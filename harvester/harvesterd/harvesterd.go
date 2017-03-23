@@ -9,6 +9,7 @@ import (
 	"sync"
 	"github.com/dbjtech/golab/harvester/db"
 	"fmt"
+	"github.com/dbjtech/golab/harvester/libs"
 )
 
 type Harvesterd struct {
@@ -23,6 +24,7 @@ type Harvesterd struct {
 	// filtersMap: filters per entry type
 	filtersMap  map[string] []IsFilter
 	logger      *zap.Logger
+	errC        chan <- libs.Error
 	ctx         context.Context
 }
 
@@ -49,6 +51,11 @@ func (h *Harvesterd) running() {
 }
 
 func (h *Harvesterd) Fatal(err error, msg string) {
+	select {
+	case <-h.ctx.Done():
+	case h.errC <- libs.Error{Err:err, Message:msg, IsFatal:true}:
+		h.logger.Error(fmt.Sprintf("fatal err:%v, msg:%s", err, msg))
+	}
 }
 
 func (h *Harvesterd) handle(et *Entry) {
@@ -113,8 +120,10 @@ func (h *Harvesterd) pumping()  {
 // todo: start multi workers to consume the entries
 func (h *Harvesterd) Start(ctx context.Context) error {
 	parentWG := ctx.Value(constant.KEY_P_WG).(*utils.WrappedWaitGroup)
+	h.ctx = ctx
 	h.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
 		With(zap.String("mod", "harvesterd"))
+	h.errC = ctx.Value(constant.KEY_ERRORS_W_CHAN).(chan <- libs.Error)
 	parentWG.Wrap(func() {
 		h.running()
 	})

@@ -20,6 +20,12 @@ func (h *HdfsPort) GetFileName(dirpath string, fd uint16) string {
 	return fmt.Sprintf("%s/%d", dirpath, fd)
 }
 
+// GetDirPath "/ari/{cluster}/{db}/{shard}
+func (h *HdfsPort) GetDirPath(cluster string, db string, shard string) string  {
+	dir := fmt.Sprintf("/ari/%s/%s/%s",cluster, db, shard)
+	return dir
+}
+
 // ResolveRows resolves content of keys
 func (h *HdfsPort) ResolveRows(dirpath string, keysMap map[RowKey][]byte) error {
 	// chunkId => serialsMap
@@ -73,9 +79,7 @@ func NewHdfsAppender(
 	hdfsPort *HdfsPort, freeFdFn func(fd uint16) error) (*HdfsAppender, error) {
 
 	name := fmt.Sprintf("/%d", fd)
-	// "/ari/{cluster}/{db}/{shard}
-	dir := fmt.Sprintf("/ari/%s/%s/%s",cluster, db, shard)
-	// "/ari/{cluster}/{db}/{shard}/w_{fd}
+	dir := hdfsPort.GetDirPath(cluster, db, shard)
 	filepath := fmt.Sprintf("%s/%s", dir, name)
 
 read:

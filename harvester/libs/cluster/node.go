@@ -135,6 +135,7 @@ type Node struct {
 	heartbeat   int64
 	allocC      chan *allocReq
 	msCaller    *masterCaller
+	callHandles map[string]func(*pb.Req)*pb.Resp
 	
 	listener net.Listener
 	LeaseId  clientv3.LeaseID
@@ -158,6 +159,7 @@ func NewNode(cluster string, listenAddr string, etcd3 *clientv3.Client) (*Node) 
 		heartbeat:10,
 		allocC:make(chan *allocReq, 1024),
 		msCaller:newMasterCaller(),
+		callHandles: make(map[string]func(*pb.Req)*pb.Resp),
 	}
 	return n
 }
@@ -175,71 +177,6 @@ func (n *Node) Fatal(err error, msg string) {
 	}()
 	// todo: maybe i should use cluster state to notify other nodes that i'm down
 }
-
-//func (n *Node) Allocate(resKey string) (<-chan interface{}) {
-//	// buf must be 1
-//	ch := make(chan interface{}, 1)
-//	req := &allocReq{reAlloc:false, resKey:resKey, wChan:(chan<-interface{})(ch)}
-//	select {
-//	case n.allocC <-req:
-//	case <-n.ctx.Done():
-//	}
-//	return ch
-//}
-//
-//func (n *Node) allocating() {
-//	var reqs []*allocReq
-//	for {
-//		// there are reqs
-//		if len(reqs) > 0 {
-//			n.lock.Lock()
-//			n.resTable.NeedFill = true
-//			for _, req := range reqs {
-//				if v, ok := n.resTable.Table[req.resKey]; ok && !req.reAlloc {
-//					req.wChan <- v
-//					continue
-//				}
-//				n.resTable.Table[req.resKey] = nil
-//			}
-//			s, err := json.Marshal(n.resTable)
-//			// now release the lock
-//			n.lock.Unlock()
-//
-//			if err != nil {
-//				msg := fmt.Sprintf("fail to marshal restable err:%v", err)
-//				n.logger.Error(msg)
-//				n.Fatal(err, msg)
-//				return
-//			}
-//
-//			// send to etcd servers
-//			_, err = n.Etcd3.Put(n.ctx,
-//				n.ClusterName.KeyResTable(n.nodeId), string(s),
-//				clientv3.WithLease(clientv3.LeaseID(n.leaseId)))
-//
-//			if err != nil {
-//				msg := fmt.Sprintf("fail to send data to etcd:%v", err)
-//				n.logger.Error(msg)
-//				n.Fatal(err, msg)
-//				return
-//			}
-//			// fixme: watch response and write to reqs' wChan
-//
-//			// clear reqs
-//			reqs = reqs[:0]
-//		}
-//
-//		for {
-//			select {
-//			case req := <-n.allocC:
-//				reqs = append(reqs, req)
-//			case <-n.ctx.Done():
-//				break
-//			}
-//		}
-//	}
-//	n.logger.Warn("allocating bye")
-//}
 
 // ChangeToState changes cluster state to v
 func (n *Node) ChangeToState(v State) {
@@ -461,13 +398,14 @@ func (n *Node) Start(ctx context.Context) error {
 	return nil
 }
 
-// OnCallMaster registers handlers for master to response nodes' requests
-func (n *Node) OnCallMaster(
+// RegCallMasterHandle registers handlers for master to response nodes' requests
+func (n *Node) RegCallMasterHandle(
 		namespace string,
 		key string,
 		fn func(req *pb.Req)*pb.Resp) {
-	// fixme:
-	panic("implement me")
+	n.lock.Lock()
+	n.callHandles[fmt.Sprintf("%s.%s", namespace, key)] = fn
+	n.lock.Unlock()
 }
 
 ////////////////////////////// call master rpc //////////////////////////////
@@ -491,13 +429,22 @@ func (n *Node) CallMaster(
 
 // Call implement rpc server.
 // to keep consistent with the rpc server interface always.
-func (n *Node) Call(context2.Context, *pb.Req) (*pb.Resp, error) {
+func (n *Node) Call(ctx context2.Context, req *pb.Req) (*pb.Resp, error) {
 	if !n.IsMaster() {
 		return &pb.Resp{Status:-1, Msg:"i'm not master"},
 			errors.New("call on nonmaster node")
 	}
-	// fixme:
-	return nil, nil
+	k := fmt.Sprintf("%s.%s", req.Namespace, req.Key)
+	n.lock.RLock()
+	handle, ok := n.callHandles[k]
+	n.lock.RUnlock()
+	if !ok {
+		// no handler found to handle this request
+		return &pb.Resp{Status:-1,
+			Msg:fmt.Sprintf("no handler to accept this req on k:%s", k)},
+			errors.New("call on nonmaster node")
+	}
+	return handle(req), nil
 }
 
 type masterCaller struct {

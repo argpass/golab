@@ -14,7 +14,7 @@ import (
 )
 
 func init()  {
-	shipper.RegisterShipper("filebeat", newFbShipper)
+	shipper.RegisterShipper("fb-shipper", newFbShipper)
 }
 
 func newFbShipper(name string, cfg *common.Config) (shipper.IsShipper, error) {
@@ -34,30 +34,47 @@ type BeatsShipper struct {
 	ctx         context.Context
 	logger      *zap.Logger
 	stop        context.CancelFunc
-	sendC       chan <-[]*harvesterd.Entry
+	sendC       chan []*harvesterd.Entry
 	errorC      chan <-libs.Error
 }
 
+func (s *BeatsShipper) running()  {
+	s.wg.Wait()
+	s.logger.Warn("bye")
+}
+
 func (s *BeatsShipper) ShipOn(
-		sendC chan <-[]*harvesterd.Entry, ctx context.Context) error {
+		sendC chan <- *harvesterd.Entry,
+		ctx context.Context) error {
 	
+	// init
+	parentWG := ctx.Value(constant.KEY_P_WG).(*utils.WrappedWaitGroup)
 	logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
-	logger = logger.With(zap.String("shipper", s.name))
+	logger = logger.With(zap.String("mod", s.name))
 	ctx = context.WithValue(ctx, constant.KEY_LOGGER, logger)
 	s.errorC = ctx.Value(constant.KEY_ERRORS_W_CHAN).(chan <- libs.Error)
 	s.logger = logger
-	s.sendC = sendC
 	s.ctx, s.stop = context.WithCancel(ctx)
 	
-	// handle done signal
-	go func(){
-		select {
-		case <-ctx.Done():
-			s.stop()
-			s.wg.Wait()
-		case <-s.ctx.Done():
+	s.wg.Wrap(func(){
+		for {
+			select {
+			case <-ctx.Done():
+				break
+			case ets := <-s.sendC:
+				// send entries to the sendC
+				for _, et := range ets {
+					select {
+					case <-ctx.Done():
+						goto exit
+					case sendC <- et:
+						// pass
+					}
+				}
+			}
 		}
-	}()
+		exit:
+	})
 	
 	// start tcp server for `filebeats`
 	tcpListener, err := net.Listen("tcp", s.cfg.Addr)
@@ -69,6 +86,11 @@ func (s *BeatsShipper) ShipOn(
 	s.wg.Wrap(func(){
 		RunTCPServer(s.ctx, tcpListener.(*net.TCPListener), handler)
 	})
+	
+	parentWG.Wrap(func(){
+		s.running()
+	})
+	
 	return nil
 }
 
@@ -76,6 +98,7 @@ func newBeatsShipper(name string, cf *Config) *BeatsShipper {
 	s := &BeatsShipper{
 		cfg:cf,
 		name: name,
+		sendC:make(chan []*harvesterd.Entry, 100),
 	}
 	return s
 }

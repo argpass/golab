@@ -109,7 +109,7 @@ func New(name string, cfg *common.Config) (*Ari, error)  {
 func (a *Ari) initHandlers()  {
 	
 	// allocate a fd
-	a.Node.OnCallMaster(
+	a.Node.RegCallMasterHandle(
 		"ari",
 		"allocate_fd",
 		func(req *pb.Req) (*pb.Resp){
@@ -190,7 +190,7 @@ func (a *Ari) initHandlers()  {
 	)
 	
 	// free a fd
-	a.Node.OnCallMaster(
+	a.Node.RegCallMasterHandle(
 		"ari",
 		"free_fd",
 		func(req *pb.Req) (*pb.Resp){
@@ -456,8 +456,19 @@ func (a *Ari) runningInMasterTask(ctx context.Context)  {
 				a.logger.Error("got nil meta in tracing busy fds")
 				return
 			}
-			// fixme: may be panic
-			delete(metas.Dbs[dbName].Shards[shard].FdLocked, fd)
+			
+			// delete the fd from locked map
+			dbMeta, ok := metas.Dbs[dbName]
+			if !ok {
+				a.logger.Error(fmt.Sprintf("no such db %s", dbName))
+				return
+			}
+			ss, ok := dbMeta.Shards[shard]
+			if !ok {
+				a.logger.Error(fmt.Sprintf("no such shard %s", shard))
+				return
+			}
+			delete(ss.FdLocked, fd)
 			
 			// update to etcd
 			data, _ := json.Marshal(metas)
@@ -465,6 +476,7 @@ func (a *Ari) runningInMasterTask(ctx context.Context)  {
 			if err != nil {
 				// todo: handle err
 				a.logger.Error(fmt.Sprintf("put meta to etcd err:%v", err))
+				return
 			}
 		},
 	)
@@ -526,6 +538,7 @@ func (a *Ari) FreeFd(db string, shard string, fd uint16) error  {
 // Ensure registers db with options
 // this method should be called before `Open`
 func (a *Ari) Ensure(db string, cfg *common.Config) error {
+	// fixme: 等待集群启动完成后，调用此方法初始化未创建的db+shard(es)
 	a.lock.Lock()
 	var opts DBOptions
 	err := cfg.Unpack(&opts)

@@ -73,6 +73,14 @@ func UnpackRowKey(data []byte) (RowKey, error) {
 	return key, nil
 }
 
+func UnpackRowKeyByBase64(bs64 string) (RowKey, error) {
+	data, err := base64.StdEncoding.DecodeString(bs64)
+	if err != nil {
+		return RowKey{}, err
+	}
+	return UnpackRowKey(data)
+}
+
 
 // CKHeader
 type CKHeader struct {

@@ -7,6 +7,6 @@ type IsDBCon interface {
 	// Save
 	Save(entry *harvesterd.Entry) error
 	// Query on the connection to the db by a special doc_type
-	Query() (*Query)
+	Query() (Query)
 }
 

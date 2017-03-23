@@ -36,47 +36,46 @@ func mock_beat_client(addr string, ctx context.Context, msgC <-chan v1.Message) 
 	return nil
 }
 
-func TestBeatsShipper_ShipOn(t *testing.T) {
-	logger := zap.NewNop()
-	errC := make(chan libs.Error)
-	fn, ok := shipper.GetShipperCreator("filebeat")
-	if !ok {
-		t.Log("expect to get filebeat creator, got nil")
-		t.Fail()
-	}
-	addr := "localhost:9876"
-	cfMap := map[string]interface{}{
-		"addr": addr,
-	}
-	cfg, err := common.NewConfigFrom(cfMap)
-	if err != nil {
-		panic(err)
-	}
-	fbShipper, err := fn("test_fb", cfg)
-	if err != nil {
-		t.Logf("fail to create fb shipper with err:%v\n", err)
-		t.Fail()
-	}
-	ch := make(chan []*harvesterd.Entry, 1)
-	ctx, stop := context.WithCancel(context.Background())
-	ctx = context.WithValue(ctx, constant.KEY_LOGGER, logger)
-	ctx = context.WithValue(ctx, constant.KEY_ERRORS_W_CHAN, (chan<-libs.Error)(errC))
-	// start shipping
-	err = fbShipper.ShipOn(ch, ctx)
-	if err != nil {
-		t.Logf("fail to start ship, err:%v\n", err)
-		stop()
-		t.Fail()
-	}
-	// start beating
-	msgC := make(chan v1.Message)
-	go func() {
-		err = mock_beat_client(addr, ctx, msgC)
-		t.Log("mock bye")
-		if err != nil {
-			t.Logf("mock err:%v\n", err)
-			t.Fail()
-		}
-	}()
-	// fixme:wait for mock done
-}
+//func TestBeatsShipper_ShipOn(t *testing.T) {
+//	logger := zap.NewNop()
+//	errC := make(chan libs.Error)
+//	fn, ok := shipper.GetShipperCreator("filebeat")
+//	if !ok {
+//		t.Log("expect to get filebeat creator, got nil")
+//		t.Fail()
+//	}
+//	addr := "localhost:9876"
+//	cfMap := map[string]interface{}{
+//		"addr": addr,
+//	}
+//	cfg, err := common.NewConfigFrom(cfMap)
+//	if err != nil {
+//		panic(err)
+//	}
+//	fbShipper, err := fn("test_fb", cfg)
+//	if err != nil {
+//		t.Logf("fail to create fb shipper with err:%v\n", err)
+//		t.Fail()
+//	}
+//	ch := make(chan []*harvesterd.Entry, 1)
+//	ctx, stop := context.WithCancel(context.Background())
+//	ctx = context.WithValue(ctx, constant.KEY_LOGGER, logger)
+//	ctx = context.WithValue(ctx, constant.KEY_ERRORS_W_CHAN, (chan<-libs.Error)(errC))
+//	// start shipping
+//	err = fbShipper.ShipOn(ch, ctx)
+//	if err != nil {
+//		t.Logf("fail to start ship, err:%v\n", err)
+//		stop()
+//		t.Fail()
+//	}
+//	// start beating
+//	msgC := make(chan v1.Message)
+//	go func() {
+//		err = mock_beat_client(addr, ctx, msgC)
+//		t.Log("mock bye")
+//		if err != nil {
+//			t.Logf("mock err:%v\n", err)
+//			t.Fail()
+//		}
+//	}()
+//}

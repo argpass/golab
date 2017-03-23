@@ -22,7 +22,10 @@ import (
 )
 
 var (
-	confile = flag.String("config", "harverster.yml", "harverster config file path")
+	confile = flag.String(
+		"config",
+		"harverster.yml",
+		"harverster config file path")
 	defaultCluster = ClusterConfig{
 		"harverster",
 		[]string{"localhost:2379"},
@@ -116,15 +119,23 @@ func (p *program) Start() error {
 	// all shared resources will be passed in the context,
 	// include inject basic context vars, and the cluster node
 	// start the cluster node
-	node := cluster.NewNode(confCluster.ClusterName, confCluster.NodeAddr, p.etcd3)
+	node := cluster.NewNode(
+		confCluster.ClusterName,
+		confCluster.NodeAddr,
+		p.etcd3)
+	// errors chan is no buf
 	p.errorsC = make(chan libs.Error)
-	p.rootCtx, p.cancel = context.WithCancel(context.Background())
+	p.rootCtx, p.cancel = context.WithCancel(
+		context.Background())
 	p.rootCtx = context.WithValue(
 		p.rootCtx, constant.KEY_LOGGER, p.logger)
 	p.rootCtx = context.WithValue(
-		p.rootCtx, constant.KEY_ERRORS_W_CHAN, (chan<-libs.Error)(p.errorsC))
-	p.rootCtx = context.WithValue(p.rootCtx, constant.KEY_NODE, node)
-	p.rootCtx = context.WithValue(p.rootCtx, constant.KEY_P_WG, &p.wg)
+		p.rootCtx, constant.KEY_ERRORS_W_CHAN,
+		(chan<-libs.Error)(p.errorsC))
+	p.rootCtx = context.WithValue(p.rootCtx,
+		constant.KEY_NODE, node)
+	p.rootCtx = context.WithValue(p.rootCtx,
+		constant.KEY_P_WG, &p.wg)
 	// start the node
 	err = node.Start(p.rootCtx)
 	if err != nil {
@@ -144,11 +155,15 @@ func (p *program) Start() error {
 	}
 	p.logger.Debug("start db done")
 	
+	
 	// 5.harvesterd
+	
+	// entries channel
 	entriesC := make(chan *harvesterd.Entry)
+	
 	harvesterD, err := harvesterd.New(
 		harvesterdConfig,
-		(<-chan*harvesterd.Entry)(entriesC),
+		(<-chan *harvesterd.Entry)(entriesC),
 		dbService)
 	if err != nil {
 		p.Fatal(err, "new harvesterd")
@@ -160,7 +175,10 @@ func (p *program) Start() error {
 	p.logger.Debug("start harvesterd done")
 	
 	// 6.shippers
-	shipperStarter, err := shipper.New(shipperConfig)
+	shipperStarter, err := shipper.New(
+		shipperConfig,
+		(chan <- *harvesterd.Entry)(entriesC),
+	)
 	if err != nil {
 		p.Fatal(err, "build shipper starter")
 	}

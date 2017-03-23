@@ -16,7 +16,7 @@ import (
 )
 
 // ConvertToEntries converts log rows to entries
-// fixme: support boolean, float
+// todo: support boolean, float
 func ConvertToEntries(rows []*LogRow) []*harvesterd.Entry {
 	entries := make([]*harvesterd.Entry, len(rows))
 	for i, row := range rows {
@@ -122,7 +122,8 @@ func (l *looperV1) IOLoop(
 		case <-ctx.Done():
 			break
 		case sendC <- entries:
-		    // todo:entries accepted, so we should send ACK to the client
+		    // todo: entries accepted,
+			// todo: so we should send ACK to the client
 		    continue
 		}
 	}

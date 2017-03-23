@@ -15,7 +15,7 @@ import (
 type IsShipper interface {
 	// ShipOn ships entries to the `sendC`
 	// never to block on the method
-	ShipOn(sendC chan<-[]*harvesterd.Entry, ctx context.Context) error
+	ShipOn(sendC chan<- *harvesterd.Entry, ctx context.Context) error
 }
 
 type Creator func(name string, cfg *common.Config) (IsShipper, error)
@@ -47,6 +47,7 @@ func GetShipperCreator(name string) (fn Creator, ok bool) {
 
 type shipperService struct {
 	rawConfig   *common.Config
+	sendC       chan <- *harvesterd.Entry
 	
 	ctx         context.Context
 }
@@ -75,13 +76,15 @@ func (s *shipperService) enableShippers() error {
 		if err != nil {
 			return err
 		}
-		// fixme: start shipper
-		//sp.ShipOn()
+		err = sp.ShipOn(s.sendC, s.ctx)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func New(cfg *common.Config) (libs.Starter, error) {
-	return &shipperService{rawConfig:cfg,}, nil
+func New(cfg *common.Config, sendC chan <- *harvesterd.Entry) (libs.Starter, error) {
+	return &shipperService{rawConfig:cfg, sendC:sendC,}, nil
 }
 

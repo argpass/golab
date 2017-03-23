@@ -26,7 +26,7 @@ func DumpEntry(entry *harvesterd.Entry) []byte {
 	buf = append(buf, '{')
 	// write fields
 	count := 0
-	entry.Fields["timestamp"] = harvesterd.
+	entry.Fields["_timestamp"] = harvesterd.
 		Value{IVal:int64(entry.Timestamp),
 			Type:harvesterd.ValueTypes.INT}
 	for key, value := range entry.Fields {
@@ -41,7 +41,7 @@ func DumpEntry(entry *harvesterd.Entry) []byte {
 		count++
 	}
 	// write tags
-	buf = append(buf, ",\"tag\":"...)
+	buf = append(buf, ",\"_tag\":"...)
 	buf = append(buf, '[')
 	for i, tag := range entry.Tags {
 		if i > 0 {
@@ -51,7 +51,7 @@ func DumpEntry(entry *harvesterd.Entry) []byte {
 	}
 	buf = append(buf, ']')
 	// write body
-	buf = append(buf, ",\"body\":\""...)
+	buf = append(buf, ",\"_body\":\""...)
 	// todo:binary bytes may be rejected by es, use base64 instead
 	buf = append(buf, entry.Body...)
 	buf = append(buf, "\""...)
