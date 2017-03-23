@@ -332,7 +332,7 @@ func (a *Ari) onMetaChanged(evt string) {
 		for dbName, wt := range a.waiters {
 			m, ok := meta.Dbs[dbName]
 			if ok {
-				wt.CheckDbMeta(m)
+				wt.CheckDbMeta(*m)
 			}
 			// todo: what to do if the db meta deleted ?
 		}
@@ -385,7 +385,7 @@ func (a *Ari) runningInMasterTask(ctx context.Context)  {
 	// busy fds: {cluster}.ari.busy_fd.{db}.{shard}.{fd}
 	clusterName := a.Node.ClusterName.String()
 	busyFdPrefix := fmt.Sprintf("%s.ari.busy_fd.", clusterName)
-	dbMetaKey := fmt.Sprintf("%s.ari.db", clusterName)
+	dbMetaKey := a.getMetaKey()
 	w := cluster.NewKeysWatcher(
 		
 		// check meta with busy fds in level init
@@ -538,17 +538,51 @@ func (a *Ari) FreeFd(db string, shard string, fd uint16) error  {
 // Ensure registers db with options
 // this method should be called before `Open`
 func (a *Ari) Ensure(db string, cfg *common.Config) error {
-	// fixme: 等待集群启动完成后，调用此方法初始化未创建的db+shard(es)
-	a.lock.Lock()
 	var opts DBOptions
 	err := cfg.Unpack(&opts)
 	if err != nil {
-		a.lock.Unlock()
 		return err
+	}
+	
+	a.lock.Lock()
+	if _, ok := a.dbOptsMap[db]; ok {
+		a.lock.Unlock()
+		return nil
 	}
 	a.dbOptsMap[db] = &opts
 	a.lock.Unlock()
+	
+	metas := a.ShouldGetMeta()
+	if metas == nil {
+		return errors.New("get nil metas")
+	}
+	_, ok := metas.Dbs[db]
+	if ok {
+		return nil
+	}
+	
+	dbMeta := GetInitialDbMeta(db, opts)
+	rawIdx := getEsRawIdx(dbMeta.Name, dbMeta.HotShard)
+	err = EnsureIndex(a.ctx, dbMeta.Name, rawIdx, a.ES)
+	if err != nil {
+		return err
+	}
+	metas.Dbs[db] = dbMeta
+	// update metas to etcd
+	dbMetaKey := a.getMetaKey()
+	data, _ := json.Marshal(metas)
+	_, err = a.Node.Etcd3.Put(a.ctx, dbMetaKey, string(data))
+	if err != nil {
+		return errors.Wrap(err, "put metas to etcd")
+	}
+	
 	return nil
+}
+
+func (a *Ari) getMetaKey() string {
+	clusterName := a.Node.ClusterName.String()
+	dbMetaKey := fmt.Sprintf("%s.ari.db", clusterName)
+	return dbMetaKey
 }
 
 // Open a db connection for `db`

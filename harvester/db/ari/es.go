@@ -5,6 +5,12 @@ import (
 	"strconv"
 	"github.com/olivere/elastic"
 	"context"
+	"os"
+	"fmt"
+	"io/ioutil"
+	"github.com/pkg/errors"
+	"bytes"
+	"text/template"
 )
 
 func appendValue(buf []byte, value harvesterd.Value) []byte {
@@ -82,6 +88,32 @@ func (b *ESBulker) Do(ctx context.Context) error {
 	_, err := b.bulks.Do(ctx)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+// EnsureIndex ensure index of `db` exist
+// if index doesn't exist, create it and alias `{db}_r` to the index
+func EnsureIndex(ctx context.Context, db string, index string, c *elastic.Client) error {
+	var bf bytes.Buffer
+	// todo: pass tlp by flag or config
+	tlp := "es.template.json"
+	t, err := template.ParseFiles(tlp)
+	if err != nil {
+		return errors.Wrap(err, "parse es template")
+	}
+	err = t.Execute(&bf, map[string]string{"Db": db})
+	if err != nil {
+		return errors.Wrap(err, "execute template")
+	}
+	_, err = c.CreateIndex(index).Body(string(bf.Bytes())).Do(ctx)
+	if err != nil {
+		if nerr, ok := err.(*elastic.Error); ok {
+				if nerr.Details.Type == "index_already_exists_exception" {
+					return nil
+				}
+		}
+		return errors.Wrap(err, "create index")
 	}
 	return nil
 }

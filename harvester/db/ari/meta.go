@@ -7,6 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"sync/atomic"
+	"fmt"
+	"time"
+	"math"
 )
 
 // ShardMeta holds meta information of a shard
@@ -34,6 +37,28 @@ type DbMeta struct {
 	CreateAt    int64                       `json:"create_at"`
 	// Options shouldn't be changed after db created
 	Options     DBOptions                   `json:"options"`
+}
+
+func NewShardMeta() *ShardMeta {
+	createAt := time.Now().Unix()
+	name := fmt.Sprintf("%s", createAt)
+	s := &ShardMeta{
+		Name:name,CreateAt:createAt,
+		FdLocked:map[int]string{}, MaxFd:math.MaxUint16,
+	}
+	return s
+}
+
+func GetInitialDbMeta(db string, ops DBOptions) *DbMeta {
+	defaultShard := NewShardMeta()
+	m := &DbMeta{
+		Shards:map[string]*ShardMeta{defaultShard.Name:defaultShard},
+		HotShard:defaultShard.Name,
+		Name:db,
+		CreateAt:defaultShard.CreateAt,
+		Options:ops,
+	}
+	return m
 }
 
 // Meta holds engine meta information
