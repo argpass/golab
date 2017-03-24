@@ -24,7 +24,7 @@ import (
 var (
 	confile = flag.String(
 		"config",
-		"harverster.yml",
+		"harvester.yml",
 		"harverster config file path")
 	defaultCluster = ClusterConfig{
 		"harverster",
@@ -95,8 +95,17 @@ func (p *program) Start() error {
 		dbConfig = common.NewConfig()
 	}
 	
+	if p.RawConfig.HasField("harvesterd") {
+		harvesterdConfig, err = p.RawConfig.Child("harvesterd", -1)
+		if err != nil {
+			p.Fatal(err, "pick harvesterd config")
+		}
+	}else{
+		harvesterdConfig = common.NewConfig()
+	}
+	
 	if p.RawConfig.HasField("shipper") {
-		shipperConfig, err = p.RawConfig.Child("db", -1)
+		shipperConfig, err = p.RawConfig.Child("shipper", -1)
 		if err != nil {
 			p.Fatal(err, "pick shipper config")
 		}
@@ -138,6 +147,7 @@ func (p *program) Start() error {
 		constant.KEY_P_WG, &p.wg)
 	// start the node
 	err = node.Start(p.rootCtx)
+	p.logger.Debug("node startted")
 	if err != nil {
 		p.Fatal(err, "start cluster node")
 	}
@@ -159,11 +169,11 @@ func (p *program) Start() error {
 	// 5.harvesterd
 	
 	// entries channel
-	entriesC := make(chan *harvesterd.Entry)
+	entriesC := make(chan *libs.Entry)
 	
 	harvesterD, err := harvesterd.New(
 		harvesterdConfig,
-		(<-chan *harvesterd.Entry)(entriesC),
+		(<-chan *libs.Entry)(entriesC),
 		dbService)
 	if err != nil {
 		p.Fatal(err, "new harvesterd")
@@ -177,7 +187,7 @@ func (p *program) Start() error {
 	// 6.shippers
 	shipperStarter, err := shipper.New(
 		shipperConfig,
-		(chan <- *harvesterd.Entry)(entriesC),
+		(chan <- *libs.Entry)(entriesC),
 	)
 	if err != nil {
 		p.Fatal(err, "build shipper starter")
@@ -192,8 +202,8 @@ func (p *program) Start() error {
 
 // Fatal kill the program with fatal error `err`
 func (p *program) Fatal(err error, msg string) {
-	p.logger.Warn(fmt.Sprintf(
-		"fatal msg:%s, err:%s", msg, err.Error()))
+	p.logger.Info(fmt.Sprintf(
+		"fatal msg:%s, err:%+v", msg, err))
 	os.Exit(1)
 }
 
@@ -201,12 +211,12 @@ func (p *program) Fatal(err error, msg string) {
 // if get a Fatal Error(IsFatal==true), i should stop the program
 // so never to run the method on `p.wg`
 func (p *program) handleErrors() {
-	var err libs.Error
+	p.logger.Debug("handle errors start")
 	for {
 		select {
 		case <-p.rootCtx.Done():
-			break
-		case err = <-p.errorsC:
+			goto exit
+		case err := <-p.errorsC:
 			if err.IsFatal {
 				// stop the program
 				p.prepareToStop(err, nil)
@@ -214,7 +224,9 @@ func (p *program) handleErrors() {
 			}
 		}
 	}
-	p.logger.Debug(fmt.Sprintf("handle errors done, err:%s", err.Error()))
+	
+exit:
+	p.logger.Info("handle errors bye")
 }
 
 // prepareToStop cleanup resources and stop goroutines
@@ -225,14 +237,16 @@ func (p *program) prepareToStop(err error, sigs []os.Signal)  {
 		p.cancel()
 		// todo: maybe i should kill the program when wait timeout
 		// wait all goroutines to exit
+		p.logger.Info("waitting for all goroutines to exit")
 		p.wg.Wait()
 		p.logger.Debug("root context stop done")
 	})
 }
 
 func (p *program) StoppedBySignals(sigs... os.Signal) error {
-	p.logger.Warn(fmt.Sprintf("to be stopped by sigs:%+v", sigs))
 	p.prepareToStop(nil, sigs)
+	p.Fatal(nil, "")
+	p.logger.Warn(fmt.Sprintf("to be stopped by sigs:%+v", sigs))
 	return nil
 }
 

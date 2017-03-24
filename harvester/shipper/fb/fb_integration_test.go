@@ -30,9 +30,10 @@ func mock_beat_client(addr string, ctx context.Context, msgC <-chan v1.Message) 
 				return err
 			}
 		case <-ctx.Done():
-			break
+			goto exit
 		}
 	}
+exit:
 	return nil
 }
 

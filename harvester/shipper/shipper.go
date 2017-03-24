@@ -1,21 +1,17 @@
 package shipper
 
 import (
-	"github.com/dbjtech/golab/harvester/harvesterd"
 	"github.com/elastic/beats/libbeat/common"
 	"sync"
 	"context"
 	"github.com/dbjtech/golab/harvester/libs"
-	"github.com/dbjtech/golab/harvester/libs/constant"
-	"github.com/dbjtech/golab/pending/utils"
-	"github.com/pkg/errors"
 	"fmt"
 )
 
 type IsShipper interface {
 	// ShipOn ships entries to the `sendC`
 	// never to block on the method
-	ShipOn(sendC chan<- *harvesterd.Entry, ctx context.Context) error
+	ShipOn(sendC chan<- *libs.Entry, ctx context.Context) error
 }
 
 type Creator func(name string, cfg *common.Config) (IsShipper, error)
@@ -47,7 +43,7 @@ func GetShipperCreator(name string) (fn Creator, ok bool) {
 
 type shipperService struct {
 	rawConfig   *common.Config
-	sendC       chan <- *harvesterd.Entry
+	sendC       chan <- *libs.Entry
 	
 	ctx         context.Context
 }
@@ -84,7 +80,7 @@ func (s *shipperService) enableShippers() error {
 	return nil
 }
 
-func New(cfg *common.Config, sendC chan <- *harvesterd.Entry) (libs.Starter, error) {
+func New(cfg *common.Config, sendC chan <- *libs.Entry) (libs.Starter, error) {
 	return &shipperService{rawConfig:cfg, sendC:sendC,}, nil
 }
 

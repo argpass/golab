@@ -14,7 +14,7 @@ import (
 
 type Harvesterd struct {
 	wg          utils.WrappedWaitGroup
-	entriesC    <-chan *Entry
+	entriesC    <-chan *libs.Entry
 	rawConfig   *common.Config
 	cfg         *Config
 	lock        sync.RWMutex
@@ -28,7 +28,7 @@ type Harvesterd struct {
 	ctx         context.Context
 }
 
-func New(cfg *common.Config, recvC <-chan *Entry, dbService *db.DBService) (*Harvesterd, error)  {
+func New(cfg *common.Config, recvC <-chan *libs.Entry, dbService *db.DBService) (*Harvesterd, error)  {
 	var cf Config
 	err := cfg.Unpack(&cf)
 	if err != nil {
@@ -47,7 +47,7 @@ func (h *Harvesterd) running() {
 	})
 	
 	h.wg.Wait()
-	h.logger.Warn("bye")
+	h.logger.Info("bye")
 }
 
 func (h *Harvesterd) Fatal(err error, msg string) {
@@ -58,7 +58,7 @@ func (h *Harvesterd) Fatal(err error, msg string) {
 	}
 }
 
-func (h *Harvesterd) handle(et *Entry) {
+func (h *Harvesterd) handle(et *libs.Entry) {
 	var err error
 	h.lock.RLock()
 	cf, ok := h.cfg.TypeRouting[et.Type]
@@ -108,12 +108,13 @@ func (h *Harvesterd) pumping()  {
 	for {
 		select {
 		case <-h.ctx.Done():
-			break
+			goto exit
 		case et := <-h.entriesC:
 			h.handle(et)
 		}
 	}
-	h.logger.Warn("pumping bye")
+exit:
+	h.logger.Info("pumping bye")
 }
 
 // Start the Harvesterd service

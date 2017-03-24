@@ -1,7 +1,6 @@
 package fb
 
 import (
-	"github.com/dbjtech/golab/harvester/harvesterd"
 	"github.com/dbjtech/golab/harvester/shipper"
 	"github.com/elastic/beats/libbeat/common"
 	"context"
@@ -14,7 +13,7 @@ import (
 )
 
 func init()  {
-	shipper.RegisterShipper("fb-shipper", newFbShipper)
+	shipper.RegisterShipper("fb", newFbShipper)
 }
 
 func newFbShipper(name string, cfg *common.Config) (shipper.IsShipper, error) {
@@ -34,17 +33,17 @@ type BeatsShipper struct {
 	ctx         context.Context
 	logger      *zap.Logger
 	stop        context.CancelFunc
-	sendC       chan []*harvesterd.Entry
+	sendC       chan []*libs.Entry
 	errorC      chan <-libs.Error
 }
 
 func (s *BeatsShipper) running()  {
 	s.wg.Wait()
-	s.logger.Warn("bye")
+	s.logger.Info("bye")
 }
 
 func (s *BeatsShipper) ShipOn(
-		sendC chan <- *harvesterd.Entry,
+		sendC chan <- *libs.Entry,
 		ctx context.Context) error {
 	
 	// init
@@ -60,7 +59,7 @@ func (s *BeatsShipper) ShipOn(
 		for {
 			select {
 			case <-ctx.Done():
-				break
+				goto exit
 			case ets := <-s.sendC:
 				// send entries to the sendC
 				for _, et := range ets {
@@ -83,6 +82,13 @@ func (s *BeatsShipper) ShipOn(
 		return err
 	}
 	handler := &tcpServer{sendC:s.sendC}
+	s.wg.Wrap(func() {
+		select {
+		case <-s.ctx.Done():
+			err := tcpListener.Close()
+			s.logger.Info(fmt.Sprintf("listener closed, err:%+v", err))
+		}
+	})
 	s.wg.Wrap(func(){
 		RunTCPServer(s.ctx, tcpListener.(*net.TCPListener), handler)
 	})
@@ -98,7 +104,7 @@ func newBeatsShipper(name string, cf *Config) *BeatsShipper {
 	s := &BeatsShipper{
 		cfg:cf,
 		name: name,
-		sendC:make(chan []*harvesterd.Entry, 100),
+		sendC:make(chan []*libs.Entry, 100),
 	}
 	return s
 }

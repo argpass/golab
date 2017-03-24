@@ -18,13 +18,13 @@ type HDFSConfig struct {
 }
 
 type ESConfig struct {
-	Addrs []string                  `config:"addr"`
+	Addrs []string                  `config:"addrs"`
 }
 
 // Config is the engine config
 type Config struct {
 	HDFS        HDFSConfig          `config:"hdfs"`
-	ES          ESConfig            `config:"hdfs"`
+	ES          ESConfig            `config:"es"`
 	GOptions    DBOptions           `config:"db_options"`
 }
 

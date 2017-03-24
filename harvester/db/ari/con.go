@@ -78,14 +78,14 @@ func (q *queryResult) resolving(hits []*elastic.SearchHit) error {
 			err = errors.Wrap(err, "unmarshal sourceMap")
 			return err
 		}
-		body, ok := sourceMap["_body"]
+		body, ok := sourceMap["@body"]
 		if !ok {
 			err = errors.New("invalid doc witout `_body` field")
 			return err
 		}
 		
 		// body is a row key, unpack it
-		rk, err := UnpackRowKeyByBase64(string(body))
+		rk, err := UnpackRowKeyByBase64(body.(string))
 		if err != nil {
 			return errors.Wrap(err, "unpack row key by base64")
 		}
@@ -120,8 +120,8 @@ func (q *queryResult) resolving(hits []*elastic.SearchHit) error {
 func (q *queryResult) scrolling() error {
 	for {
 		select {
-		case q.ctx.Done():
-			break
+		case <-q.ctx.Done():
+			goto exit
 		default:
 		}
 		
@@ -129,7 +129,7 @@ func (q *queryResult) scrolling() error {
 		if err != nil {
 			// no more documents
 			if err.Error() == "EOF" {
-				break
+				goto exit
 			}else{
 				err = errors.Wrap(err, "scroll err")
 				return err
@@ -144,6 +144,7 @@ func (q *queryResult) scrolling() error {
 			return err
 		}
 	}
+exit:
 	return nil
 }
 
@@ -165,7 +166,7 @@ func (q *queryResult) Err() error {
 
 type simpleQ struct {
 	con *NativeConnection
-	tags []string
+	tags []interface{}
 	fields map[string]string
 }
 
@@ -186,7 +187,7 @@ func (q *simpleQ) Do(ctx context.Context) (db.IsQueryResult, error) {
 	index := getESRDIdx(q.con.waiter.db)
 	var qr []elastic.Query
 	if q.tags != nil {
-		tagQuery := elastic.NewTermsQuery("_tag", q.tags...)
+		tagQuery := elastic.NewTermsQuery("@tag", q.tags...)
 		qr = append(qr, tagQuery)
 	}
 	if q.fields != nil {
@@ -208,7 +209,7 @@ func (q *simpleQ) Do(ctx context.Context) (db.IsQueryResult, error) {
 type NativeConnection struct {
 	es *elastic.Client
 	waiter *DbWaiter
-	sendC chan <- *harvesterd.Entry
+	sendC chan <- *libs.Entry
 	ctx context.Context
 	id uint64
 	closed uint32
@@ -219,7 +220,7 @@ func (c *NativeConnection) Query() (db.Query) {
 }
 
 func newNativeConnection(
-		sendC chan <- *harvesterd.Entry,
+		sendC chan <- *libs.Entry,
 		ctx context.Context, id uint64,
 		client *elastic.Client,
 		waiter *DbWaiter) *NativeConnection {
@@ -248,29 +249,30 @@ func (c *NativeConnection) IsClosed() bool {
 }
 
 // Save save the entry to the `ARI`
-func (c *NativeConnection) Save(entry *harvesterd.Entry) error {
+func (c *NativeConnection) Save(entry *libs.Entry) error {
 	if c.IsClosed() {
 		return harvesterd.Error{Code:libs.E_DB_CLOSED}
 	}
 
-	var ch chan <-*harvesterd.Entry = c.sendC
+	var ch chan <-*libs.Entry = c.sendC
 	attemptMaximum := 3
 	attempt := 0
 	for {
 		select {
 		case ch <- entry:
-			break
+			goto exit
 		case <-c.ctx.Done():
-			return harvesterd.Error{Code:libs.E_DB_CLOSED}
+			return harvesterd.Error{Code: libs.E_DB_CLOSED}
 		default:
 			attempt++
 			if attempt >= attemptMaximum {
-				return harvesterd.Error{Code:libs.E_MAXIMUM_ATTEMPT}
+				return harvesterd.Error{Code: libs.E_MAXIMUM_ATTEMPT}
 			}
 			runtime.Gosched()
 			continue
 		}
 	}
+exit:
 	return nil
 }
 
@@ -282,7 +284,7 @@ type DbWaiter struct {
 	a           *Ari
 	db          string
 	dbMeta      DbMeta
-	entriesC    chan *harvesterd.Entry
+	entriesC    chan *libs.Entry
 	cons        []*NativeConnection
 	
 	ctx         context.Context
@@ -296,7 +298,7 @@ func newWaiter(db string, a *Ari, meta DbMeta) *DbWaiter {
 	w := &DbWaiter{
 		db:db,
 		a:a,
-		entriesC:make(chan *harvesterd.Entry),
+		entriesC:make(chan *libs.Entry),
 	}
 	w.CheckDbMeta(meta)
 	return w
@@ -315,13 +317,13 @@ func (w *DbWaiter) CheckDbMeta(meta DbMeta) {
 
 func (w *DbWaiter) running() {
 	// start servicing
-	recvC := (<-chan *harvesterd.Entry) (w.entriesC)
+	recvC := (<-chan *libs.Entry) (w.entriesC)
 	w.wg.Wrap(func(){
 		w.pumpingBatch(recvC)
 	})
 	// wait my sub goroutines to exit
 	w.wg.Wait()
-	w.a.logger.Warn("bye")
+	w.a.logger.Info("bye")
 }
 
 func (w *DbWaiter) Start(ctx context.Context) error {
@@ -347,7 +349,7 @@ func (w *DbWaiter) NewConnection() (*NativeConnection) {
 	conId := uint64(time.Now().UnixNano())
 	
 	con := newNativeConnection(
-		(chan <-*harvesterd.Entry)(w.entriesC),
+		(chan <-*libs.Entry)(w.entriesC),
 		w.ctx,
 		conId,
 		w.a.ES,
@@ -359,7 +361,7 @@ func (w *DbWaiter) NewConnection() (*NativeConnection) {
 }
 
 func (w *DbWaiter) handleBatch(ctx context.Context,
-	batch []*harvesterd.Entry)  {
+	batch []*libs.Entry)  {
 	
 	if len(batch) == 0 {
 		return
@@ -379,8 +381,8 @@ func (w *DbWaiter) handleBatch(ctx context.Context,
 }
 
 // pumpingBatch receives data and makes batch to send to writer
-func (w *DbWaiter) pumpingBatch(ch <-chan *harvesterd.Entry) {
-	var entry *harvesterd.Entry
+func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) {
+	var entry *libs.Entry
 	var needWrap bool
 	// todo: should with timeout ?
 	// todo: limit maximum handle batch goroutines ?
@@ -389,14 +391,14 @@ func (w *DbWaiter) pumpingBatch(ch <-chan *harvesterd.Entry) {
 	batchSizeMaximum := 1 * 1024 * 1024
 	batchTimeDelayMaximum := 30 * time.Second
 	ticker := time.NewTicker(batchTimeDelayMaximum)
-	buf := make([]*harvesterd.Entry, batchMaximum)
+	buf := make([]*libs.Entry, batchMaximum)
 	cur := 0
 	size := 0
 
 	for {
 		if needWrap && cur > 0 {
 			// make batch
-			batch := make([]*harvesterd.Entry, cur)
+			batch := make([]*libs.Entry, cur)
 			copy(batch, buf[:cur])
 
 			// start new goroutine to handle the batch
@@ -428,11 +430,12 @@ func (w *DbWaiter) pumpingBatch(ch <-chan *harvesterd.Entry) {
 				continue
 			}
 		case <-w.ctx.Done():
-			break
+			goto exit
 		}
 	}
+exit:
 	ticker.Stop()
-	w.a.logger.Warn("pumpingBatch exit")
+	w.a.logger.Info("pumpingBatch exit")
 }
 
 // createBatchWriter creates a new writer
@@ -538,7 +541,7 @@ func (b *writer) getEsBulker() *ESBulker  {
 }
 
 // Write batch to db
-func (b *writer) Write(ctx context.Context, batch []*harvesterd.Entry) error {
+func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
 	if len(batch) == 0 {
 		return nil
 	}

@@ -1,40 +1,37 @@
 package ari
 
 import (
-	"github.com/dbjtech/golab/harvester/harvesterd"
 	"strconv"
 	"github.com/olivere/elastic"
 	"context"
-	"os"
-	"fmt"
-	"io/ioutil"
 	"github.com/pkg/errors"
 	"bytes"
 	"text/template"
+	"github.com/dbjtech/golab/harvester/libs"
 )
 
-func appendValue(buf []byte, value harvesterd.Value) []byte {
-	if value.Type == harvesterd.ValueTypes.STR {
+func appendValue(buf []byte, value libs.Value) []byte {
+	if value.Type == libs.ValueTypes.STR {
 		buf = append(buf, '"')
 		buf = append(buf, value.SVal...)
 		buf = append(buf, '"')
-	}else if value.Type == harvesterd.ValueTypes.INT {
+	}else if value.Type == libs.ValueTypes.INT {
 		buf = strconv.AppendInt(buf, value.IVal, 10)
-	}else if value.Type == harvesterd.ValueTypes.FLOAT {
+	}else if value.Type == libs.ValueTypes.FLOAT {
 		buf = strconv.AppendFloat(buf, value.FVal, 'f', -1, 64)
 	}
 	return buf
 }
 
 // DumpEntry dumps the entry to ES Document json string
-func DumpEntry(entry *harvesterd.Entry) []byte {
+func DumpEntry(entry *libs.Entry) []byte {
 	var buf = make([]byte, 0, 1024)
 	buf = append(buf, '{')
 	// write fields
 	count := 0
-	entry.Fields["_timestamp"] = harvesterd.
+	entry.Fields["_timestamp"] = libs.
 		Value{IVal:int64(entry.Timestamp),
-			Type:harvesterd.ValueTypes.INT}
+			Type:libs.ValueTypes.INT}
 	for key, value := range entry.Fields {
 		if count > 0 {
 			buf = append(buf, ',')

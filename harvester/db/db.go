@@ -9,6 +9,7 @@ import (
 	"github.com/dbjtech/golab/harvester/libs/constant"
 	"fmt"
 	"sync"
+	"github.com/pkg/errors"
 )
 
 var _ libs.Starter = &DBService{}
@@ -31,7 +32,7 @@ type DBService struct {
 func (d *DBService) Start(ctx context.Context) error {
 	// init
 	d.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
-		With(zap.String("moudle", "db"))
+		With(zap.String("mod", "db"))
 	d.ctx, d.cancel = context.WithCancel(ctx)
 	
 	// enable engines with `db.engine` config field
@@ -96,17 +97,16 @@ func (d *DBService) enableEngines(enginesConfig *common.Config) error {
 	for _, name := range enginesConfig.GetFields() {
 		enCreator, exists := GetEngine(name)
 		if !exists {
-			return fmt.Errorf("engine %s not found", name)
+			return errors.New(fmt.Sprintf("engine %s not found", name))
 		}
 		cf, err := enginesConfig.Child(name, -1)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "pick engine config")
 		}
 		// create and start an engine instance
 		d.enabledEngines[name], err = enCreator(name, cf, d.ctx)
 		if err != nil {
-			d.logger.Error(fmt.Sprintf("fail to enable engine:%s", name))
-			return err
+			return errors.Wrapf(err, "enable engine - %s", name)
 		}
 	}
 	return nil

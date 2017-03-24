@@ -143,7 +143,7 @@ type Node struct {
 	logger   *zap.Logger
 	ctx      context.Context
 	stop     context.CancelFunc
-	nodeInfo *pb.NodeInfo
+	nodeInfo pb.NodeInfo
 	
 	resTable    *ResTable
 }
@@ -173,7 +173,7 @@ func (n *Node) Fatal(err error, msg string) {
 	// start a routine to wait all routines to exit
 	go func(){
 		n.wg.Wait()
-		n.logger.Warn("bye")
+		n.logger.Info("bye")
 	}()
 	// todo: maybe i should use cluster state to notify other nodes that i'm down
 }
@@ -181,7 +181,7 @@ func (n *Node) Fatal(err error, msg string) {
 // ChangeToState changes cluster state to v
 func (n *Node) ChangeToState(v State) {
 	n.state.ChangeTo(v)
-	n.logger.Warn(fmt.Sprintf("node change to state [%s]", v.String()))
+	n.logger.Info(fmt.Sprintf("node change to state [%s]", v.String()))
 }
 
 // WaitState wait cluster state changed to v
@@ -274,7 +274,7 @@ func (n *Node) raceMaster()  error {
 			}
 			
 			// lock was deleted, try to create it once again
-			if evt.Type.EnumDescriptor()[1] == clientv3.EventTypeDelete {
+			if evt.Type == clientv3.EventTypeDelete {
 				// expire master caller connection
 				n.msCaller.Invalid()
 				err := n.touchMasterLockOnce()
@@ -296,7 +296,7 @@ func (n *Node) raceMaster()  error {
 			err := n.msCaller.Reconnect(masterId)
 			if err != nil {
 				n.msCaller.Invalid()
-				n.logger.Warn(fmt.Sprintf("fail to dial master on addr:%s, err:%v", masterId, err))
+				n.logger.Info(fmt.Sprintf("fail to dial master on addr:%s, err:%v", masterId, err))
 			}
 			
 			if string(evt.Kv.Value) == n.nodeId {
@@ -316,24 +316,25 @@ func (n *Node) raceMaster()  error {
 		for {
 			select {
 			case <-watchCtx.Done():
-				break
+				goto exit
 			case resp := <-wC:
 				err := resp.Err()
 				if err != nil {
 					n.logger.Error(fmt.Sprintf("master lock watch err:%v, " +
 						"watch stop", err))
-					break
+					goto exit
 				}
 				if resp.Canceled {
 					// watch canceled
-					n.logger.Warn("master lock watch canceled")
-					break
+					n.logger.Info("master lock watch canceled")
+					goto exit
 				}
 				for _, evt := range resp.Events {
 					handleEvt(evt)
 				}
 			}
 		}
+		exit:
 	})
 	// wait for watcher to start
 	<-watchStart
@@ -352,11 +353,26 @@ func (n *Node) running() {
 	s := grpc.NewServer()
 	pb.RegisterCallMasterServer(s, n)
 	n.wg.Wrap(func() {
-		s.Serve(n.listener)
+		select {
+		case <-n.ctx.Done():
+			err := n.listener.Close()
+			n.logger.Info(fmt.Sprintf("listener closed, err:%+v", err))
+		}
+	})
+	n.wg.Wrap(func() {
+		err := s.Serve(n.listener)
+		if err != nil {
+			select {
+			case <-n.ctx.Done():
+				// pass
+			default:
+				n.logger.Error(fmt.Sprintf("rpc serve err:%+v", err))
+			}
+		}
 	})
 	// wait all sub goroutines to exit
 	n.wg.Wait()
-	n.logger.Warn("bye")
+	n.logger.Info("bye")
 }
 
 // Start the cluster
@@ -411,7 +427,7 @@ func (n *Node) RegCallMasterHandle(
 ////////////////////////////// call master rpc //////////////////////////////
 
 func (n *Node) getNodeInfo() (*pb.NodeInfo) {
-	return n.nodeInfo
+	return &n.nodeInfo
 }
 
 // CallMaster calls master by rpc client of node
@@ -423,7 +439,7 @@ func (n *Node) CallMaster(
 	if c == nil {
 		return nil, errors.New("invalid rpc client")
 	}
-	req := &pb.Req{Namespace:namespace,Key:key,ReqBuf:reqBuf, Node:n.nodeInfo}
+	req := &pb.Req{Namespace:namespace,Key:key,ReqBuf:reqBuf, Node:&n.nodeInfo}
 	return c.Call(ctx, req)
 }
 

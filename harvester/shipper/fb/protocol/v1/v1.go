@@ -10,17 +10,17 @@ import (
 	"runtime"
 	"github.com/golang/protobuf/proto"
 	"errors"
-	"github.com/dbjtech/golab/harvester/harvesterd"
 	"github.com/dbjtech/golab/harvester/libs/constant"
 	"go.uber.org/zap"
+	"github.com/dbjtech/golab/harvester/libs"
 )
 
 // ConvertToEntries converts log rows to entries
 // todo: support boolean, float
-func ConvertToEntries(rows []*LogRow) []*harvesterd.Entry {
-	entries := make([]*harvesterd.Entry, len(rows))
+func ConvertToEntries(rows []*LogRow) []*libs.Entry {
+	entries := make([]*libs.Entry, len(rows))
 	for i, row := range rows {
-		entry := harvesterd.NewEntry(row.LogType, uint64(row.Timestamp), row.GetBody())
+		entry := libs.NewEntry(row.LogType, uint64(row.Timestamp), row.GetBody())
 		for _, fi := range row.Fields {
 			if fi.Type == Field_IsInt {
 				entry.AddIntField(fi.Key, fi.Ival)
@@ -69,7 +69,7 @@ func NewLooperV1(connectionId uint64) *looperV1 {
 
 func (l *looperV1) IOLoop(
 	ctx context.Context, con net.Conn,
-	sendC chan <- []*harvesterd.Entry) error {
+	sendC chan <- []*libs.Entry) error {
 	
 	var err error
 	logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
@@ -78,7 +78,7 @@ func (l *looperV1) IOLoop(
 	for {
 		select {
 		case <-ctx.Done():
-			break
+			goto exit
 		default:
 		}
 		msg := Message{}
@@ -91,7 +91,7 @@ func (l *looperV1) IOLoop(
 				continue
 			}
 			// read err
-			break
+			goto exit
 		}
 		
 		// todo: never to timeout but how to got exit signal ?
@@ -101,7 +101,7 @@ func (l *looperV1) IOLoop(
 		_, err = io.ReadFull(con, msg.Data)
 		if err != nil {
 			// read err
-			break
+			goto exit
 		}
 
 		var bulk Bulk
@@ -111,7 +111,7 @@ func (l *looperV1) IOLoop(
 			if invalidCounter > 3 {
 				err = errors.New(fmt.Sprintf("read %d times invalid protobuf buffer, " +
 					"client maybe broken, stop", invalidCounter))
-				break
+				goto exit
 			}
 			continue
 		}
@@ -120,7 +120,7 @@ func (l *looperV1) IOLoop(
 
 		select {
 		case <-ctx.Done():
-			break
+			goto exit
 		case sendC <- entries:
 		    // todo: entries accepted,
 			// todo: so we should send ACK to the client
@@ -128,6 +128,7 @@ func (l *looperV1) IOLoop(
 		}
 	}
 
+exit:
 	if err != nil {
 		logger.Error(fmt.Sprintf("loop done with err:%v", err))
 	}else{

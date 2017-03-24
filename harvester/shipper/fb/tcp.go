@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"github.com/dbjtech/golab/harvester/libs/constant"
 	"github.com/dbjtech/golab/harvester/shipper/fb/protocol/v1"
-	"github.com/dbjtech/golab/harvester/harvesterd"
+	"github.com/dbjtech/golab/harvester/libs"
 )
 
 type TCPHandler interface {
@@ -18,11 +18,11 @@ type TCPHandler interface {
 
 func RunTCPServer(ctx context.Context, listener *net.TCPListener, handler TCPHandler)  {
 	logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
-	logger.Warn(fmt.Sprintf("listen on:%s", listener.Addr()))
+	logger.Info(fmt.Sprintf("listen on:%s", listener.Addr()))
 	for {
 		select {
 		case <-ctx.Done():
-			break
+			goto exit
 		default:
 		}
 		con, err := listener.Accept()
@@ -30,7 +30,7 @@ func RunTCPServer(ctx context.Context, listener *net.TCPListener, handler TCPHan
 			if nerr, ok := err.(net.Error); ok {
 				if nerr.Temporary() {
 					// temporary err, next
-					logger.Warn("temporary Accept() err")
+					logger.Info("temporary Accept() err")
 					runtime.Gosched()
 					continue
 				}
@@ -40,20 +40,27 @@ func RunTCPServer(ctx context.Context, listener *net.TCPListener, handler TCPHan
 					continue
 				}
 			}
-			// errors that can't be ignored, exit
-			logger.Error(fmt.Sprintf("Accept() error:%s", err))
-			break
+			select {
+			case <-ctx.Done():
+				// listener closed
+				goto exit
+			default:
+				// errors that can't be ignored, exit
+				logger.Error(fmt.Sprintf("Accept() error:%s", err))
+				goto exit
+			}
 		}
 		// start a routine to handle the connection
 		go handler.Handle(ctx, con)
 	}
 	// i'm dead
-	logger.Warn(fmt.Sprintf("closing %s", listener.Addr()))
+exit:
+	logger.Info(fmt.Sprintf("closing %s", listener.Addr()))
 }
 
 // tcpServer is a simple `TCPHandler` implement
 type tcpServer struct {
-	sendC chan <- []*harvesterd.Entry
+	sendC chan <- []*libs.Entry
 }
 
 func (server *tcpServer) Handle(ctx context.Context, con net.Conn) {

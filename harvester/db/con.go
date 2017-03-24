@@ -1,11 +1,10 @@
 package db
 
-import "github.com/dbjtech/golab/harvester/harvesterd"
-
+import "github.com/dbjtech/golab/harvester/libs"
 
 type IsDBCon interface {
 	// Save
-	Save(entry *harvesterd.Entry) error
+	Save(entry *libs.Entry) error
 	// Query on the connection to the db by a special doc_type
 	Query() (Query)
 }

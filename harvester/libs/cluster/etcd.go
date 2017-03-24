@@ -155,8 +155,6 @@ type ValueWatcher struct {
 	wg          utils.WrappedWaitGroup
 	errFn       func(error)
 	keyPrefix string
-	
-	ctx         context.Context
 }
 
 func NewValueWatcher(
@@ -213,7 +211,7 @@ func (m *ValueWatcher) Watch(
 					if !ok {
 						continue
 					}
-					if evt.Type.EnumDescriptor()[1] == clientv3.EventTypeDelete {
+					if evt.Type == clientv3.EventTypeDelete {
 						err = keyWacher.OnDelete()
 					}else if evt.IsCreate() {
 						err = keyWacher.OnCreate(evt.Kv.Value)
@@ -226,10 +224,11 @@ func (m *ValueWatcher) Watch(
 						}
 					}
 				}
-			case <-m.ctx.Done():
-				break
+			case <-ctx.Done():
+				goto exit
 			}
 		}
+		exit:
 	})
 	return nil
 }
@@ -262,7 +261,7 @@ func (m *keysWatcher) Watch(
 			select {
 			case evts := <-ch:
 				for _, evt := range evts.Events {
-					if evt.Type.EnumDescriptor()[1] == clientv3.EventTypeDelete {
+					if evt.Type == clientv3.EventTypeDelete {
 						m.evtNotifyFn(EVT_DELETE, evt.Kv)
 					}else if evt.IsCreate() {
 						m.evtNotifyFn(EVT_CREATE, evt.Kv)
@@ -271,9 +270,10 @@ func (m *keysWatcher) Watch(
 					}
 				}
 			case <-ctx.Done():
-				break
+				goto exit
 			}
 		}
+		exit:
 	}()
 	return nil
 }

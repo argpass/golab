@@ -2,10 +2,10 @@
   "mappings": {
     "_default_": {
       "_all": {
-        "enable": false
+        "enabled": false
       },
       "_source": {
-        "enable": false
+        "enabled": false
       },
       "date_detection": false,
       "dynamic_templates": [
@@ -23,18 +23,15 @@
         "@timestamp": {
           "type": "date"
         },
-        "_body": {
-          "type": "keyword",
-          "store": true,
-          "doc_values": false
+        "@body": {
+          "type": "binary",
+          "store": true
         },
-        "_tag": {
-          "type": "keyword",
-          "doc_values": false
+        "@tag": {
+          "type": "keyword"
         },
-        "_timestamp": {
-          "type": "long",
-          "doc_values": false
+        "@t": {
+          "type": "long"
         }
       }
     }
@@ -45,6 +42,9 @@
     "index.refresh_interval": "90s",
     "index.number_of_shards" : 4,
     "index.number_of_replicas" : 1
+  },
+  "aliases": {
+    "{{.Db}}_r": {}
   },
   "template": "ari.*"
 }

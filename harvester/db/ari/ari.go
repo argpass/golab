@@ -20,6 +20,8 @@ import (
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"strings"
 	"strconv"
+	"github.com/coreos/etcd/clientv3"
+	"time"
 )
 
 func init()  {
@@ -28,6 +30,7 @@ func init()  {
 		func(name string,
 		cfg *common.Config,
 		ctx context.Context) (db.IsEngine, error){
+			
 			a, err := New(name, cfg)
 			if err != nil {
 				return nil, err
@@ -81,14 +84,22 @@ func New(name string, cfg *common.Config) (*Ari, error)  {
 	cf := defaultConfig
 	err := cfg.Unpack(&cf)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "unpack ari engine config")
 	}
+	
+	// make value viewer for the meta info
 	vv, err := cluster.MakeValueViewer(func(data []byte)(interface{}, error) {
-		return nil, nil
+		var metas Meta
+		err := json.Unmarshal(data, &metas)
+		if err != nil {
+			return nil, errors.Wrap(err, "unmarshal meta")
+		}
+		return &metas, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "make value viewer for meta")
 	}
+	
 	a := &Ari{
 		name:       name,
 		rawConfig:  cfg,
@@ -275,10 +286,11 @@ func (a *Ari) Start(ctx context.Context) error {
 		})
 	err = a.Node.Etcd3.Watch(a.ctx, dbMetaKey, w)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "watch db meta key")
 	}
 	
 	a.initHandlers()
+	a.logger.Debug("init handlers done")
 	
 	// register master tasks
 	a.Node.RegMasterTask(
@@ -292,6 +304,7 @@ func (a *Ari) Start(ctx context.Context) error {
 	
 	// es, hdfs client
 	a.ES, err = elastic.NewClient(elastic.SetURL(a.cfg.ES.Addrs...))
+	//a.logger.Warn(fmt.Sprintf("es addrs:%v", a.cfg.ES.Addrs))
 	if err != nil {
 		a.logger.Error(fmt.Sprintf("fail to new client of es, err:%v", err))
 		return err
@@ -307,7 +320,7 @@ func (a *Ari) Start(ctx context.Context) error {
 }
 
 func (a *Ari) Fatal(err error, msg string)  {
-	a.logger.Error(fmt.Sprintf("fatal err:%s, msg:%s", err.Error(), msg))
+	a.logger.Error(fmt.Sprintf("fatal err:%+v, msg:%s", err, msg))
 	// cancel self
 	a.cancel()
 }
@@ -348,7 +361,7 @@ func (a *Ari) GetMeta() *Meta {
 	m, ok := v.(*Meta)
 	if !ok {
 		// use check type, if not expected type, log error and fatal
-		a.Fatal(fmt.Errorf("Get Unspected meta type:%s not (*Meta)", m), "")
+		//a.Fatal(fmt.Errorf("Get Unspected meta type:%s not (*Meta)", m), "")
 		return nil
 	}
 	return m
@@ -381,11 +394,27 @@ func unpackFdKey(prefix string, rawKey string) (db string, shard string, fd int,
 }
 
 func (a *Ari) runningInMasterTask(ctx context.Context)  {
-	// keep metas valid
-	// busy fds: {cluster}.ari.busy_fd.{db}.{shard}.{fd}
+	
 	clusterName := a.Node.ClusterName.String()
 	busyFdPrefix := fmt.Sprintf("%s.ari.busy_fd.", clusterName)
 	dbMetaKey := a.getMetaKey()
+	
+	// ensure metas initialized
+	defaultMeta := Meta{}
+	data , _ := json.Marshal(defaultMeta)
+	resp, _:= a.Node.Etcd3.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(dbMetaKey), ">", 0)).
+	    Else(clientv3.OpPut(dbMetaKey, string(data))).Commit()
+	if !resp.Succeeded {
+		a.logger.Debug("i init the meta")
+		
+		// fixme: wait by node state instead of fabricated time
+		// wait all nodes recv new meta
+		time.Sleep(2 * time.Second)
+	}
+	
+	// keep metas valid
+	// check busy fds: {cluster}.ari.busy_fd.{db}.{shard}.{fd}
 	w := cluster.NewKeysWatcher(
 		
 		// check meta with busy fds in level init
@@ -405,7 +434,7 @@ func (a *Ari) runningInMasterTask(ctx context.Context)  {
 				fdMap[dbName][shard][fd]=string(kv.Value)
 			}
 			
-			metas := a.ShouldGetMeta()
+			metas := a.GetMeta()
 			if metas == nil {
 				return
 			}
@@ -498,7 +527,7 @@ func (a *Ari) AllocateFd(db string, shard string) (uint16, error) {
 		return 0, err
 	}
 	if resp.Status != int32(0) {
-		a.logger.Warn(
+		a.logger.Info(
 			fmt.Sprintf("[allocate-fd] call master status:%d, msg:%s",
 				resp.Status, resp.Msg,
 			),
@@ -526,7 +555,7 @@ func (a *Ari) FreeFd(db string, shard string, fd uint16) error  {
 		return err
 	}
 	if resp.Status != int32(0) {
-		a.logger.Warn(fmt.Sprintf("[free-fd] call master status:%d, msg:%s",
+		a.logger.Info(fmt.Sprintf("[free-fd] call master status:%d, msg:%s",
 			resp.Status, resp.Msg))
 		return errors.New("free fd fail")
 	}
@@ -567,6 +596,9 @@ func (a *Ari) Ensure(db string, cfg *common.Config) error {
 	if err != nil {
 		return err
 	}
+	if metas.Dbs == nil {
+		metas.Dbs = map[string]*DbMeta{}
+	}
 	metas.Dbs[db] = dbMeta
 	// update metas to etcd
 	dbMetaKey := a.getMetaKey()
@@ -592,7 +624,7 @@ func (a *Ari) Open(db string) (db.IsDBCon, error) {
 	if metas == nil {
 		return nil, errors.New("no meta info")
 	}
-	m, ok := metas[db]
+	m, ok := metas.Dbs[db]
 	if !ok {
 		return nil, errors.New("no such db configured")
 	}
@@ -605,7 +637,7 @@ func (a *Ari) Open(db string) (db.IsDBCon, error) {
 	
 	// if waiter doesn't exist, create it
 	if !exists {
-		wt = newWaiter(db, a, m)
+		wt = newWaiter(db, a, *m)
 		err := wt.Start(a.ctx)
 		if err != nil {
 			return nil, err

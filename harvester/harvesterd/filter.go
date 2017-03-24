@@ -1,5 +1,7 @@
 package harvesterd
 
+import "github.com/dbjtech/golab/harvester/libs"
+
 type IsFilter interface {
-	Filter(entry *Entry) (bool, error)
+	Filter(entry *libs.Entry) (bool, error)
 }
