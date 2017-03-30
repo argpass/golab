@@ -32,6 +32,7 @@ type Doc struct {
 //
 type IsQueryResult interface {
 	ResultChan() <- chan Doc
+	Done() <- chan struct{}
 	Err() error
 	Close()
 }

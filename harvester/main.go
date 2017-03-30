@@ -16,47 +16,53 @@ import (
 	"github.com/dbjtech/golab/harvester/harvesterd"
 	_ "github.com/dbjtech/golab/harvester/db/ari"
 	_ "github.com/dbjtech/golab/harvester/shipper/fb"
+	_ "github.com/dbjtech/golab/harvester/shipper/mock"
 	"github.com/dbjtech/golab/harvester/libs/cluster"
 	"github.com/coreos/etcd/clientv3"
 	"time"
+	"github.com/pkg/errors"
 )
 
 var (
+	
 	confile = flag.String(
 		"config",
 		"harvester.yml",
 		"harverster config file path")
+	debug = flag.Bool("debug", false, "debug level ?")
+	
 	defaultCluster = ClusterConfig{
-		"harverster",
+		"myharvester",
 		[]string{"localhost:2379"},
 		"localhost:8765",
 	}
+	
 )
 
 type ClusterConfig struct {
-	ClusterName string      `json:"cluster_name"`
-	EtcdAddrs   []string    `json:"etcd_addrs"`
-	NodeAddr    string      `json:"node_addr"`
+	ClusterName string      `config:"cluster_name"`
+	EtcdAddrs   []string    `config:"etcd_addrs"`
+	NodeAddr    string      `config:"node_addr"`
 }
 
 type program struct {
 	logger      *zap.Logger
 	etcd3       *clientv3.Client
+	err         error
 	
 	RawConfig *common.Config
-	wg        utils.WrappedWaitGroup
-	rootCtx   context.Context
-	cancel    context.CancelFunc
+	wg        utils.IsGroup
+	//cancel    context.CancelFunc
 	onceStop  sync.Once
-	errorsC   chan libs.Error
 }
 
-func (p *program) configured() {
+func (p *program) configured() error {
 	cfg, err := common.LoadFile(*confile)
 	if err != nil {
-		p.Fatal(err, "configured")
+		return errors.Wrap(err, "load config file")
 	}
 	p.RawConfig = cfg
+	return nil
 }
 
 // Start the program
@@ -70,12 +76,18 @@ func (p *program) Start() error {
 	var dbConfig            *common.Config
 	var shipperConfig       *common.Config
 	var harvesterdConfig    *common.Config
-	p.configured()
+	
+	// load config
+	err = p.configured()
+	if err != nil {
+		return err
+	}
+	
 	// cluster
 	if p.RawConfig.HasField("cluster") {
 		clusterConfig, err = p.RawConfig.Child("cluster", -1)
 		if err != nil {
-			p.Fatal(err, "pick cluster config")
+			return errors.Wrap(err, "pick cluster config")
 		}
 	}else{
 		clusterConfig = common.NewConfig()
@@ -83,13 +95,13 @@ func (p *program) Start() error {
 	confCluster := defaultCluster
 	err = clusterConfig.Unpack(&confCluster)
 	if err != nil {
-		p.Fatal(err, "unpack cluster config")
+		return errors.Wrap(err, "unpack cluster config")
 	}
 	
 	if p.RawConfig.HasField("db") {
 		dbConfig, err = p.RawConfig.Child("db", -1)
 		if err != nil {
-			p.Fatal(err, "pick db config")
+			return errors.Wrap(err, "pick db config")
 		}
 	}else{
 		dbConfig = common.NewConfig()
@@ -98,7 +110,7 @@ func (p *program) Start() error {
 	if p.RawConfig.HasField("harvesterd") {
 		harvesterdConfig, err = p.RawConfig.Child("harvesterd", -1)
 		if err != nil {
-			p.Fatal(err, "pick harvesterd config")
+			return errors.Wrap(err, "pick harvesterd config")
 		}
 	}else{
 		harvesterdConfig = common.NewConfig()
@@ -107,7 +119,7 @@ func (p *program) Start() error {
 	if p.RawConfig.HasField("shipper") {
 		shipperConfig, err = p.RawConfig.Child("shipper", -1)
 		if err != nil {
-			p.Fatal(err, "pick shipper config")
+			return errors.Wrap(err, "pick shipper config")
 		}
 	}else{
 		shipperConfig = common.NewConfig()
@@ -119,7 +131,7 @@ func (p *program) Start() error {
 		DialTimeout: 5 * time.Second,
 	})
 	if err != nil {
-		p.Fatal(err, "connect etcd3")
+		return errors.Wrap(err, "connect etcd3")
 	}
 	p.etcd3 = cli
 	
@@ -132,42 +144,62 @@ func (p *program) Start() error {
 		confCluster.ClusterName,
 		confCluster.NodeAddr,
 		p.etcd3)
-	// errors chan is no buf
-	p.errorsC = make(chan libs.Error)
-	p.rootCtx, p.cancel = context.WithCancel(
-		context.Background())
-	p.rootCtx = context.WithValue(
-		p.rootCtx, constant.KEY_LOGGER, p.logger)
-	p.rootCtx = context.WithValue(
-		p.rootCtx, constant.KEY_ERRORS_W_CHAN,
-		(chan<-libs.Error)(p.errorsC))
-	p.rootCtx = context.WithValue(p.rootCtx,
+	
+	// context, cancel, stop, values
+	gp := utils.NewGroup(context.Background())
+	ctx := context.WithValue(
+		gp.Context(), constant.KEY_LOGGER, p.logger)
+	ctx = context.WithValue(ctx,
 		constant.KEY_NODE, node)
-	p.rootCtx = context.WithValue(p.rootCtx,
-		constant.KEY_P_WG, &p.wg)
+	ctx = context.WithValue(ctx,
+		constant.KEY_P_WG, gp)
+	
+	p.wg = gp
+	
 	// start the node
-	err = node.Start(p.rootCtx)
+	err = node.Start(ctx)
 	p.logger.Debug("node startted")
 	if err != nil {
-		p.Fatal(err, "start cluster node")
+		return errors.Wrap(err, "start cluster node")
 	}
 	// errors handler, never to run the method in on `p.wg`
-	go p.handleErrors()
+	//go p.handleErrors()
 	
 	// 4.start the db service
 	dbService, err := db.New(dbConfig)
 	if err != nil {
-		p.Fatal(err, "build dbService")
+		return err
 	}
-	err = dbService.Start(p.rootCtx)
+	err = dbService.Start(ctx)
 	if err != nil {
-		p.Fatal(err, "start db service")
+		return errors.Wrap(err, "start db service")
 	}
 	p.logger.Debug("start db done")
 	
+	// todo-remove
+	gp.Go(func() error {
+		return nil
+		con, err := dbService.Open("db_8")
+		if err != nil {
+			return errors.Wrap(err, "open db_8")
+		}
+		resutl, err := con.Query().WithTag("mock").Do(ctx)
+		if err != nil {
+			return errors.Wrap(err, "do query")
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-resutl.Done():
+				return nil
+			case doc := <-resutl.ResultChan():
+				fmt.Printf("doc:%v\n", doc)
+			}
+		}
+	})
 	
 	// 5.harvesterd
-	
 	// entries channel
 	entriesC := make(chan *libs.Entry)
 	
@@ -176,11 +208,11 @@ func (p *program) Start() error {
 		(<-chan *libs.Entry)(entriesC),
 		dbService)
 	if err != nil {
-		p.Fatal(err, "new harvesterd")
+		return errors.Wrap(err, "new harvesterd")
 	}
-	err = harvesterD.Start(p.rootCtx)
+	err = harvesterD.Start(ctx)
 	if err != nil {
-		p.Fatal(err, "start harvesterd")
+		return errors.Wrap(err, "start harvesterd")
 	}
 	p.logger.Debug("start harvesterd done")
 	
@@ -190,51 +222,24 @@ func (p *program) Start() error {
 		(chan <- *libs.Entry)(entriesC),
 	)
 	if err != nil {
-		p.Fatal(err, "build shipper starter")
+		return errors.Wrap(err, "build shipper starter")
 	}
-	err = shipperStarter.Start(p.rootCtx)
+	err = shipperStarter.Start(ctx)
 	if err != nil {
-		p.Fatal(err, "start shippers")
+		return errors.Wrap(err, "start shippers")
 	}
 	p.logger.Debug("start shippers done")
+	
 	return nil
 }
 
-// Fatal kill the program with fatal error `err`
-func (p *program) Fatal(err error, msg string) {
-	p.logger.Info(fmt.Sprintf(
-		"fatal msg:%s, err:%+v", msg, err))
-	os.Exit(1)
-}
-
-// handleErrors handle Errors raised by sub goroutines
-// if get a Fatal Error(IsFatal==true), i should stop the program
-// so never to run the method on `p.wg`
-func (p *program) handleErrors() {
-	p.logger.Debug("handle errors start")
-	for {
-		select {
-		case <-p.rootCtx.Done():
-			goto exit
-		case err := <-p.errorsC:
-			if err.IsFatal {
-				// stop the program
-				p.prepareToStop(err, nil)
-				p.Fatal(err, "handle errors")
-			}
-		}
-	}
-	
-exit:
-	p.logger.Info("handle errors bye")
-}
-
-// prepareToStop cleanup resources and stop goroutines
-func (p *program) prepareToStop(err error, sigs []os.Signal)  {
+// stop cleanups resources and stop goroutines
+func (p *program) stop(err error, sigs []os.Signal)  {
 	p.onceStop.Do(func(){
 		defer utils.Cleanup()
+		p.err = err
 		// cancel root context
-		p.cancel()
+		p.wg.Cancel(err)
 		// todo: maybe i should kill the program when wait timeout
 		// wait all goroutines to exit
 		p.logger.Info("waitting for all goroutines to exit")
@@ -243,18 +248,30 @@ func (p *program) prepareToStop(err error, sigs []os.Signal)  {
 	})
 }
 
-func (p *program) StoppedBySignals(sigs... os.Signal) error {
-	p.prepareToStop(nil, sigs)
-	p.Fatal(nil, "")
-	p.logger.Warn(fmt.Sprintf("to be stopped by sigs:%+v", sigs))
-	return nil
+func (p *program) Stop(err error, sigs... os.Signal) {
+	p.logger.Info(fmt.Sprintf("to be stopped by err:%+v, sigs:%+v", err, sigs))
+	p.stop(err, sigs)
+}
+
+func (p *program) Context() context.Context {
+	return p.wg.Context()
+}
+
+func (p *program) Err() error {
+	return p.err
 }
 
 func main()  {
 	flag.Parse()
 	
-	// todo: create logger by `-logging` flag
-	logger, err := zap.NewDevelopment()
+	var logger *zap.Logger
+	var err error
+	if *debug {
+		logger, err = zap.NewDevelopment()
+		logger.Debug("run on debug level")
+	}else {
+		logger, err = zap.NewProduction()
+	}
 	
 	// etcd
 	if err != nil {
@@ -266,4 +283,10 @@ func main()  {
 	
 	p := &program{logger:logger}
 	err = utils.RunProgram(p)
+	if err != nil {
+		logger.Error(fmt.Sprintf("bye, err:%+v\n", err))
+		os.Exit(199)
+		return
+	}
+	logger.Info("bye")
 }

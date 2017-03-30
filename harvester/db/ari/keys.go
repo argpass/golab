@@ -23,6 +23,6 @@ func unpackIdxName(idx string) (db string, shard string, err error) {
 }
 
 func getESRDIdx(db string) string {
-	index := fmt.Sprintf("ari.%s_read", db)
+	index := fmt.Sprintf("ari.%s_r", db)
 	return index
 }

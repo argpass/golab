@@ -1,16 +1,18 @@
 package ari
 
 type ShardPolicy struct {
+	
 	// MaxDu maximum_duration units:m(month),w(week),d(day),h(hour)
 	// if "", no max duration
 	// Example: 1w2d3h
-	MaxDu       string              `config:"maximum_duration"`
+	MaxDu       string              `config:"maximum_duration" json:"maximum_duration"`
+	
 	// MaxIdx maximum_idx_size units(gb), if "", no max size
-	MaxIdx      string              `config:"maximum_idx_size"`
+	MaxIdx      string              `config:"maximum_idx_size" json:"maximum_idx_size"`
 }
 
 type DBOptions struct {
-	ShardPolicy ShardPolicy         `config:"shard_policy"`
+	ShardPolicy ShardPolicy         `config:"shard_policy" json:"shard_policy"`
 }
 
 type HDFSConfig struct {

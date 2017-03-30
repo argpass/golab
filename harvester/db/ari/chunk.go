@@ -6,8 +6,9 @@ import (
 	"compress/gzip"
 	"io"
 	"io/ioutil"
-	"errors"
 	"encoding/base64"
+	"github.com/pkg/errors"
+	"fmt"
 )
 
 const (
@@ -119,22 +120,26 @@ func (c *Chunk) ResolveRows(serialsMap map[uint16][]byte) error {
 	}
 	data, err := c.Unpack()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "unpack chunk")
 	}
 	// header size
 	hdSize := int(binary.BigEndian.Uint32(data[:4]))
-	var hdReader = bytes.NewReader(data[4:hdSize])
+	var hdReader = bytes.NewReader(data[4:4 + hdSize])
 
 	var last int = 0
 	var remainCnt = len(serialsMap)
+	rowsData := data[4 + hdSize:]
 	for i:=0; ;i++ {
 		rowLen, err := binary.ReadUvarint(hdReader)
 		if err != nil {
-			break
+			if err.Error() == "EOF" {
+				break
+			}
+			return errors.Wrap(err, "read chunk's data uvarint")
 		}
 		end := int(rowLen) + last
 		if _, yes := serialsMap[uint16(i)]; yes {
-			serialsMap[uint16(i)] = data[last: end]
+			serialsMap[uint16(i)] = rowsData[last: end]
 			remainCnt--
 		}
 	}
@@ -145,24 +150,25 @@ func (c *Chunk) ResolveRows(serialsMap map[uint16][]byte) error {
 	return errors.New("fail to fetch all rows")
 }
 
-// Unpack chunk content data
+// Unpack chunk packed data
 func (c *Chunk) Unpack() ([]byte, error) {
 	if c.Compressed == COMPRESSED_NO {
 		return c.packed, nil
 	}
 	if c.Compressed == COMPRESSED_GZIP {
-		var br = bytes.NewBuffer(nil)
+		var br = bytes.NewBuffer(c.packed)
 		gr, err := gzip.NewReader(br)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "new gizp reader from chunck bytes")
 		}
 		data, err := ioutil.ReadAll(gr)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "read all gzip buf")
 		}
 		return data, nil
 	}
-	return nil, errors.New("unkown compressed format")
+	return nil, errors.New(
+		fmt.Sprintf("unkown compressed format:%d", c.Compressed))
 }
 
 // ReadChunk reads chunk data from the `io.Reader`
@@ -170,15 +176,20 @@ func ReadChunk(reader io.Reader) (*Chunk, error) {
 	chunk := &Chunk{}
 	err := binary.Read(reader, binary.BigEndian, &chunk.CKHeader)
 	if err != nil {
-		return nil, err
+		if err.Error() == "EOF" {
+			return nil, nil
+		}
+		return nil, errors.Wrap(err, "read chunk header")
 	}
 
 	// resolve the packed
-	remainSize := chunk.DataSize
-	chunk.packed = make([]byte, remainSize)
-	_, err = io.ReadFull(reader, chunk.packed)
+	packedSize := chunk.DataSize
+	chunk.packed = make([]byte, packedSize)
+	n, err := io.ReadFull(reader, chunk.packed)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err,
+			"read packed data, expect %d , read %d, err:%s",
+			packedSize, n, err.Error())
 	}
 	return chunk, nil
 }
@@ -218,7 +229,7 @@ func (b *ChunkBuilder) Build() *Chunk {
 	var buf bytes.Buffer
 	
 	// write header size
-	binary.Write(&buf, binary.BigEndian, uint32(4 + b.lenListBuf.Len()))
+	binary.Write(&buf, binary.BigEndian, uint32(b.lenListBuf.Len()))
 	buf.Write(b.lenListBuf.Bytes())
 	buf.Write(b.rowsBuf.Bytes())
 	

@@ -1,7 +1,6 @@
 package harvesterd
 
 import (
-	"github.com/dbjtech/golab/pending/utils"
 	"context"
 	"github.com/dbjtech/golab/harvester/libs/constant"
 	"github.com/elastic/beats/libbeat/common"
@@ -10,27 +9,34 @@ import (
 	"github.com/dbjtech/golab/harvester/db"
 	"fmt"
 	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/pkg/errors"
+	"github.com/dbjtech/golab/pending/utils"
 )
 
 type Harvesterd struct {
-	wg          utils.WrappedWaitGroup
+	wg          utils.IsGroup
 	entriesC    <-chan *libs.Entry
 	rawConfig   *common.Config
 	cfg         *Config
 	lock        sync.RWMutex
 	dbCons      map[string]db.IsDBCon
 	dbService   *db.DBService
+	fatalC      chan error
 
 	// filtersMap: filters per entry type
 	filtersMap  map[string] []IsFilter
 	logger      *zap.Logger
-	errC        chan <- libs.Error
 	ctx         context.Context
 }
 
-func New(cfg *common.Config, recvC <-chan *libs.Entry, dbService *db.DBService) (*Harvesterd, error)  {
+func New(
+	cfg *common.Config,
+	recvC <-chan *libs.Entry,
+	dbService *db.DBService) (*Harvesterd, error)  {
+	
 	var cf Config
 	err := cfg.Unpack(&cf)
+	//fmt.Printf("cf:%+v, %v\n", cf, cfg.HasField("type_routing"))
 	if err != nil {
 		return nil, err
 	}
@@ -38,24 +44,39 @@ func New(cfg *common.Config, recvC <-chan *libs.Entry, dbService *db.DBService) 
 		rawConfig:cfg, entriesC:recvC, cfg: &cf,
 		dbCons:make(map[string]db.IsDBCon),
 		dbService:dbService,
+		fatalC:make(chan error, 1),
 	}, nil
 }
 
-func (h *Harvesterd) running() {
-	h.wg.Wrap(func(){
-		h.pumping()
-	})
-	
-	h.wg.Wait()
-	h.logger.Info("bye")
+func (h *Harvesterd) Fatal(err error)  {
+	h.lock.Lock()
+	select {
+	case h.fatalC <- err:
+	case <-h.ctx.Done():
+	}
+	h.lock.Unlock()
 }
 
-func (h *Harvesterd) Fatal(err error, msg string) {
-	select {
-	case <-h.ctx.Done():
-	case h.errC <- libs.Error{Err:err, Message:msg, IsFatal:true}:
-		h.logger.Error(fmt.Sprintf("fatal err:%v, msg:%s", err, msg))
-	}
+func (h *Harvesterd) running() error {
+	
+	h.wg.Go(func() error {
+		select {
+		case <-h.ctx.Done():
+			return h.ctx.Err()
+		case err := <-h.fatalC:
+			return err
+		}
+	})
+	
+	h.wg.Go(func() error {
+		return h.pumping()
+	})
+	
+	// wait any routine to return an error
+	err := h.wg.Wait()
+	h.logger.Info("bye")
+	// raise the err to parents
+	return err
 }
 
 func (h *Harvesterd) handle(et *libs.Entry) {
@@ -64,7 +85,7 @@ func (h *Harvesterd) handle(et *libs.Entry) {
 	cf, ok := h.cfg.TypeRouting[et.Type]
 	if !ok {
 		h.lock.RUnlock()
-		h.Fatal(nil, fmt.Sprintf("no such doctype (%s) config", et.Type))
+		h.Fatal(errors.New(fmt.Sprintf("no such doctype (%s) config", et.Type)))
 		return
 	}
 	
@@ -76,7 +97,7 @@ func (h *Harvesterd) handle(et *libs.Entry) {
 		// create a new connection
 		con, err = h.dbService.Open(cf.SaveToDb)
 		if err != nil {
-			h.Fatal(err, fmt.Sprintf("fail to open connection for db %s", cf.SaveToDb))
+			h.Fatal(errors.New(fmt.Sprintf("fail to open connection for db %s", cf.SaveToDb)))
 			return
 		}
 		h.lock.Lock()
@@ -87,7 +108,7 @@ func (h *Harvesterd) handle(et *libs.Entry) {
 		h.lock.RLock()
 	}
 	
-	err = con.Save(et)
+	err = h.dbCons[cf.SaveToDb].Save(et)
 	if err != nil {
 		h.lock.RUnlock()
 		
@@ -96,7 +117,7 @@ func (h *Harvesterd) handle(et *libs.Entry) {
 		delete(h.dbCons, cf.SaveToDb)
 		h.lock.Unlock()
 		
-		h.Fatal(err, "fail to save entry")
+		h.Fatal(errors.Wrap(err, "fail to save entry"))
 		return
 	}
 	
@@ -104,29 +125,29 @@ func (h *Harvesterd) handle(et *libs.Entry) {
 	h.lock.RUnlock()
 }
 
-func (h *Harvesterd) pumping()  {
+func (h *Harvesterd) pumping()  error {
+	defer h.logger.Info("pumping bye")
+	
 	for {
 		select {
 		case <-h.ctx.Done():
-			goto exit
+			return h.ctx.Err()
 		case et := <-h.entriesC:
 			h.handle(et)
 		}
 	}
-exit:
-	h.logger.Info("pumping bye")
 }
 
 // Start the Harvesterd service
 // todo: start multi workers to consume the entries
 func (h *Harvesterd) Start(ctx context.Context) error {
-	parentWG := ctx.Value(constant.KEY_P_WG).(*utils.WrappedWaitGroup)
-	h.ctx = ctx
+	parentWG := ctx.Value(constant.KEY_P_WG).(utils.IsGroup)
 	h.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
 		With(zap.String("mod", "harvesterd"))
-	h.errC = ctx.Value(constant.KEY_ERRORS_W_CHAN).(chan <- libs.Error)
-	parentWG.Wrap(func() {
-		h.running()
+	h.wg = utils.NewGroup(ctx)
+	h.ctx = h.wg.Context()
+	parentWG.Go(func() error {
+		return h.running()
 	})
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"sync"
 	"context"
 	"fmt"
-	"github.com/dbjtech/golab/pending/utils"
 	"github.com/olivere/elastic"
 	"github.com/colinmarc/hdfs"
 	"github.com/elastic/beats/libbeat/common"
@@ -22,6 +21,7 @@ import (
 	"strconv"
 	"github.com/coreos/etcd/clientv3"
 	"time"
+	"github.com/dbjtech/golab/pending/utils"
 )
 
 func init()  {
@@ -48,7 +48,6 @@ func init()  {
 // The Ari runs as a cluster with `etcd` service,
 // there is a master in the cluster to manage locks and meta data
 type Ari struct {
-	wg 		    utils.WrappedWaitGroup
 	lock 		sync.RWMutex
 	name 		string
 	rawConfig   *common.Config
@@ -65,8 +64,8 @@ type Ari struct {
 	// waiters are used to manage db connections for every db
 	waiters     map[string]*DbWaiter
 	
+	wg 	   utils.IsGroup
 	ctx    context.Context
-	cancel context.CancelFunc
 	logger *zap.Logger
 	Node   *cluster.Node
 	ES     *elastic.Client
@@ -159,6 +158,7 @@ func (a *Ari) initHandlers()  {
 				if _, ok := sMeta.FdLocked[i]; !ok {
 					fd = i
 					success = true
+					break
 				}
 			}
 			if !success {
@@ -264,12 +264,16 @@ func (a *Ari) initHandlers()  {
 
 // Start the engine
 func (a *Ari) Start(ctx context.Context) error {
+	pWG := ctx.Value(constant.KEY_P_WG).(utils.IsGroup)
 	var err error
 	// init
 	a.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
 	a.Node = ctx.Value(constant.KEY_NODE).(*cluster.Node)
-	a.ctx, a.cancel = context.WithCancel(ctx)
-	//pWg := ctx.Value(constant.KEY_P_WG).(*utils.WrappedWaitGroup)
+	a.wg = utils.NewGroup(ctx)
+	a.ctx = a.wg.Context()
+	a.ctx = context.WithValue(a.wg.Context(), constant.KEY_P_WG, a.wg)
+	
+	a.logger.Debug("start...")
 	
 	// keep viewing db meta
 	clusterName := a.Node.ClusterName.String()
@@ -316,13 +320,29 @@ func (a *Ari) Start(ctx context.Context) error {
 	}
 	a.Hdfs = &HdfsPort{Client: hd}
 	
+	pWG.Go(func() error {
+		return a.running()
+	})
 	return nil
 }
 
+func (a *Ari) running() error {
+	a.logger.Debug("running")
+	a.wg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		}
+	})
+	err := a.wg.Wait()
+	a.logger.Info("bye")
+	return err
+}
+
 func (a *Ari) Fatal(err error, msg string)  {
-	a.logger.Error(fmt.Sprintf("fatal err:%+v, msg:%s", err, msg))
 	// cancel self
-	a.cancel()
+	a.logger.Error(fmt.Sprintf("fatal err:%+v, msg:%s", err, msg))
+	a.wg.Cancel(err)
 }
 
 ///////////////////////////////// db meta ///////////////////////////////
@@ -539,6 +559,7 @@ func (a *Ari) AllocateFd(db string, shard string) (uint16, error) {
 	if err != nil {
 		return 0, err
 	}
+	a.logger.Info(fmt.Sprintf("[allocate-fd]:%d\n", rp.Fd))
 	return uint16(rp.Fd), nil
 }
 
@@ -559,6 +580,7 @@ func (a *Ari) FreeFd(db string, shard string, fd uint16) error  {
 			resp.Status, resp.Msg))
 		return errors.New("free fd fail")
 	}
+	a.logger.Info(fmt.Sprintf("[free-fd]:%d\n", fd))
 	return nil
 }
 

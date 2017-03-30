@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/pkg/errors"
 )
 
 
@@ -29,6 +30,7 @@ func (h *HdfsPort) GetDirPath(cluster string, db string, shard string) string  {
 // ResolveRows resolves content of keys
 func (h *HdfsPort) ResolveRows(dirpath string, keysMap map[RowKey][]byte) error {
 	// chunkId => serialsMap
+	// serialsMap: map[serial]data
 	chunkPlan := map[ChunkID]map[uint16][]byte{}
 	for rowKey := range keysMap {
 		chunkId := rowKey.ChunkID
@@ -39,21 +41,35 @@ func (h *HdfsPort) ResolveRows(dirpath string, keysMap map[RowKey][]byte) error 
 		chunkPlan[chunkId][rowKey.Serial] = nil
 	}
 	for chunkId, serialsMap := range chunkPlan {
+		pos := fmt.Sprintf("dirpath:%s, fd:%d, off:%d",
+			dirpath, chunkId.FD(), chunkId.Offset())
+		
+		// fetch chunk
 		fi, err := h.Client.Open(h.GetFileName(dirpath, chunkId.FD()))
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "open hdfs file, %s", pos)
 		}
 		_, err = fi.Seek(int64(chunkId.Offset()), 0)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "chunk offset, %s", pos)
 		}
 		chunk, err := ReadChunk(fi)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "read chunk %s", pos)
 		}
+		// no such chunk
+		if chunk == nil {
+			return errors.New(fmt.Sprintf("no such chunk %s", pos))
+		}
+		
+		// resolve in the chunk
 		err = chunk.ResolveRows(serialsMap)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "resolve rows %s", pos)
+		}
+		// put data to keysMap
+		for serial, data := range serialsMap {
+			keysMap[MakeRowKey(chunkId.FD(), chunkId.Offset(), serial)] = data
 		}
 	}
 	return nil
@@ -78,7 +94,7 @@ func NewHdfsAppender(
 	shard string, fd uint16,
 	hdfsPort *HdfsPort, freeFdFn func(fd uint16) error) (*HdfsAppender, error) {
 
-	name := fmt.Sprintf("/%d", fd)
+	name := fmt.Sprintf("%d", fd)
 	dir := hdfsPort.GetDirPath(cluster, db, shard)
 	filepath := fmt.Sprintf("%s/%s", dir, name)
 
@@ -146,7 +162,7 @@ func (h *HdfsAppender) Append(data []byte) (offset uint64, err error) {
 		return
 	}
 	offset = h.cur
-	h.cur++
+	h.cur += uint64(len(data))
 	h.lock.Unlock()
 	return
 }
@@ -155,11 +171,11 @@ func (h *HdfsAppender) Append(data []byte) (offset uint64, err error) {
 func (h *HdfsAppender) Close() error {
 	h.lock.Lock()
 	h.closed = true
-	err := h.freeFdFn(h.fd)
-	if err != nil {
-		return err
-	}
-	err = h.writer.Close()
+	
+	// only try to free it, never to raise error on the method
+	h.freeFdFn(h.fd)
+	
+	err := h.writer.Close()
 	if err != nil {
 		h.lock.Unlock()
 		return err

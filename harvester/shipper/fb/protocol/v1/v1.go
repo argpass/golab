@@ -122,8 +122,7 @@ func (l *looperV1) IOLoop(
 		case <-ctx.Done():
 			goto exit
 		case sendC <- entries:
-		    // todo: entries accepted,
-			// todo: so we should send ACK to the client
+		    // todo: entries accepted so we should send ACK to the client
 		    continue
 		}
 	}

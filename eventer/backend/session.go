@@ -12,10 +12,11 @@ const (
 	EMPTY_SESSION_ID = "00000000"
 )
 
+// Session: map[key]value
 type Session map[string]interface{}
 
 func (s *Session) GetSessionId() string {
-	s["session_id"]
+	return s["session_id"].(string)
 }
 
 type SessionStorage struct {

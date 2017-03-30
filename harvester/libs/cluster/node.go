@@ -125,7 +125,6 @@ type allocReq struct {
 // Node of the Cluster
 type Node struct {
 	state       StateAware
-	wg          utils.WrappedWaitGroup
 	lock        sync.RWMutex
 	// nodeId is also the net addr of node
 	nodeId      string
@@ -137,12 +136,12 @@ type Node struct {
 	msCaller    *masterCaller
 	callHandles map[string]func(*pb.Req)*pb.Resp
 	
+	wg          utils.IsGroup
 	listener net.Listener
 	LeaseId  clientv3.LeaseID
 	isMaster uint32
 	logger   *zap.Logger
 	ctx      context.Context
-	stop     context.CancelFunc
 	nodeInfo pb.NodeInfo
 	
 	resTable    *ResTable
@@ -166,16 +165,9 @@ func NewNode(cluster string, listenAddr string, etcd3 *clientv3.Client) (*Node) 
 
 func (n *Node) Fatal(err error, msg string) {
 	n.logger.Error(fmt.Sprintf("node fatal with msg:%s, err:%v", msg, err))
+	n.wg.Cancel(err)
 	// revoke my lease
 	n.Etcd3.Revoke(n.ctx, clientv3.LeaseID(n.LeaseId))
-	// notify all sub goroutines created by me to exit
-	n.stop()
-	// start a routine to wait all routines to exit
-	go func(){
-		n.wg.Wait()
-		n.logger.Info("bye")
-	}()
-	// todo: maybe i should use cluster state to notify other nodes that i'm down
 }
 
 // ChangeToState changes cluster state to v
@@ -265,7 +257,7 @@ func (n *Node) raceMaster()  error {
 	// start watch to watch lock's value
 	// if value changed and value is my nodeId,
 	// i change to master else i change to node
-	n.wg.Wrap(func(){
+	n.wg.Go(func() error {
 		wC := n.Etcd3.Client.Watch(watchCtx, key_lock)
 		handleEvt := func(evt *clientv3.Event) {
 			// only watch the lock key
@@ -316,25 +308,23 @@ func (n *Node) raceMaster()  error {
 		for {
 			select {
 			case <-watchCtx.Done():
-				goto exit
+				return watchCtx.Err()
 			case resp := <-wC:
 				err := resp.Err()
 				if err != nil {
 					n.logger.Error(fmt.Sprintf("master lock watch err:%v, " +
 						"watch stop", err))
-					goto exit
+					return err
 				}
 				if resp.Canceled {
 					// watch canceled
-					n.logger.Info("master lock watch canceled")
-					goto exit
+					return errors.New("master lock watch canceled")
 				}
 				for _, evt := range resp.Events {
 					handleEvt(evt)
 				}
 			}
 		}
-		exit:
 	})
 	// wait for watcher to start
 	<-watchStart
@@ -343,23 +333,26 @@ func (n *Node) raceMaster()  error {
 	return n.touchMasterLockOnce()
 }
 
-func (n *Node) running() {
+func (n *Node) running() error {
 	// start keeping lease alive
-	n.wg.Wrap(func(){
-		n.Etcd3.KeepAlive(n.ctx, n.LeaseId)
+	n.wg.Go(func() error {
+		_, err := n.Etcd3.KeepAlive(n.ctx, n.LeaseId)
+		return err
 	})
 	
 	// rpc server
 	s := grpc.NewServer()
 	pb.RegisterCallMasterServer(s, n)
-	n.wg.Wrap(func() {
+	n.wg.Go(func() error {
 		select {
 		case <-n.ctx.Done():
 			err := n.listener.Close()
 			n.logger.Info(fmt.Sprintf("listener closed, err:%+v", err))
 		}
+		return nil
 	})
-	n.wg.Wrap(func() {
+	
+	n.wg.Go(func() error {
 		err := s.Serve(n.listener)
 		if err != nil {
 			select {
@@ -369,20 +362,26 @@ func (n *Node) running() {
 				n.logger.Error(fmt.Sprintf("rpc serve err:%+v", err))
 			}
 		}
+		return err
 	})
+	
 	// wait all sub goroutines to exit
-	n.wg.Wait()
+	err := n.wg.Wait()
 	n.logger.Info("bye")
+	// raise error
+	return err
 }
 
 // Start the cluster
 func (n *Node) Start(ctx context.Context) error {
-	pWg := ctx.Value(constant.KEY_P_WG).(*utils.WrappedWaitGroup)
+	pWg := ctx.Value(constant.KEY_P_WG).(utils.IsGroup)
 	
 	// init instance
 	n.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
 		With(zap.String("node_id", n.nodeId))
-	n.ctx, n.stop = context.WithCancel(ctx)
+	group := utils.NewGroup(ctx)
+	n.wg = group
+	n.ctx = group.Context()
 	
 	// make and keep lease alive
 	// the lease will be used to attach node related keys,
@@ -407,10 +406,9 @@ func (n *Node) Start(ctx context.Context) error {
 	}
 	n.listener = listener
 	
-	pWg.Wrap(func(){
-		n.running()
+	pWg.Go(func() error {
+		return n.running()
 	})
-	
 	return nil
 }
 

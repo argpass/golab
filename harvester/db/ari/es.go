@@ -29,7 +29,10 @@ func DumpEntry(entry *libs.Entry) []byte {
 	buf = append(buf, '{')
 	// write fields
 	count := 0
-	entry.Fields["_timestamp"] = libs.
+	if entry.Fields == nil {
+		entry.Fields = map[string]libs.Value{}
+	}
+	entry.Fields["@timestamp"] = libs.
 		Value{IVal:int64(entry.Timestamp),
 			Type:libs.ValueTypes.INT}
 	for key, value := range entry.Fields {
@@ -44,7 +47,7 @@ func DumpEntry(entry *libs.Entry) []byte {
 		count++
 	}
 	// write tags
-	buf = append(buf, ",\"_tag\":"...)
+	buf = append(buf, ",\"@tag\":"...)
 	buf = append(buf, '[')
 	for i, tag := range entry.Tags {
 		if i > 0 {
@@ -54,8 +57,7 @@ func DumpEntry(entry *libs.Entry) []byte {
 	}
 	buf = append(buf, ']')
 	// write body
-	buf = append(buf, ",\"_body\":\""...)
-	// todo:binary bytes may be rejected by es, use base64 instead
+	buf = append(buf, ",\"@body\":\""...)
 	buf = append(buf, entry.Body...)
 	buf = append(buf, "\""...)
 	buf = append(buf, '}')
