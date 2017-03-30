@@ -8,15 +8,20 @@ import (
 	"fmt"
 )
 
+// IsShipper
 type IsShipper interface {
+	
 	// ShipOn ships entries to the `sendC`
 	// never to block on the method
 	ShipOn(sendC chan<- *libs.Entry, ctx context.Context) error
 }
 
+// Creator is factory method of a shipper
 type Creator func(name string, cfg *common.Config) (IsShipper, error)
 
-var registry = map[string]Creator{}
+// registry holds all registered shipper Creator
+// mu is the lock of registry
+var registry = map[string]Creator {}
 var mu = &sync.Mutex{}
 
 // RegisterShipper registers a Factory method for the shipper of `name`
@@ -80,6 +85,7 @@ func (s *shipperService) enableShippers() error {
 	return nil
 }
 
+// New create a shipperService instance
 func New(cfg *common.Config, sendC chan <- *libs.Entry) (libs.Starter, error) {
 	return &shipperService{rawConfig:cfg, sendC:sendC,}, nil
 }

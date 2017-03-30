@@ -3,7 +3,6 @@ package ari
 import (
 	"github.com/dbjtech/golab/harvester/harvesterd"
 	"context"
-	"runtime"
 	"sync/atomic"
 	"github.com/dbjtech/golab/pending/utils"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"sync"
 	"encoding/json"
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -25,14 +23,16 @@ const (
 )
 
 type queryResult struct {
-	closeOnce   sync.Once
-	eg          *errgroup.Group
-	sl          *elastic.ScrollService
-	ctx         context.Context
-	cancel      context.CancelFunc
-	docsChan    chan db.Doc
-	err         error
-	waiter      *DbWaiter
+	closeOnce sync.Once
+	doneC     chan struct{}
+	logger    *zap.Logger
+	eg        utils.IsGroup
+	sl        *elastic.ScrollService
+	ctx       context.Context
+	writeC    chan <- db.Doc
+	readC      <- chan db.Doc
+	err       error
+	waiter    *DbWaiter
 }
 
 func newQueryResult(
@@ -40,80 +40,130 @@ func newQueryResult(
 	sl *elastic.ScrollService,
 	waiter *DbWaiter) *queryResult {
 	
+	ch := make(chan db.Doc)
 	q := &queryResult{
-		sl:sl,
-		docsChan: make(chan db.Doc),
-		waiter:waiter,
+		sl:     sl,
+		writeC: (chan<-db.Doc)(ch),
+		readC: (<-chan db.Doc)(ch),
+		waiter: waiter,
+		doneC:  make(chan struct{}),
 	}
-	ctx, stop := context.WithCancel(ctx)
-	q.cancel = stop
-	q.eg, q.ctx = errgroup.WithContext(ctx)
+	pWG := ctx.Value(constant.KEY_P_WG).(utils.IsGroup)
+	q.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).With(zap.String("mod", "query-result"))
+	q.eg = utils.NewGroup(ctx)
+	q.ctx = q.eg.Context()
 	
+	pWG.Go(func() error {
+		err := q.running()
+		if err != nil {
+			q.logger.Error(fmt.Sprintf("query result err:%+v", err))
+		}
+		// i will never to cancel parent
+		return nil
+	})
+	
+	return q
+}
+
+func (q *queryResult) running() error {
 	q.eg.Go(func() error {
 		return q.scrolling()
 	})
 	
+	q.logger.Debug("running")
+	err := q.eg.Wait()
 	// to close myself when scrolling done
-	go func(){
-		err := q.eg.Wait()
-		if err != nil {
-			q.err = err
-		}
-		q.Close()
-	}()
+	q.Close()
+	if err != nil {
+		q.err = err
+	}
+	q.logger.Debug("bye")
+	return err
+}
+
+func (q *queryResult) resolvingOne(hit *elastic.SearchHit) error  {
+	// get `_body`
+	s := []byte(*hit.Source)
+	var sourceMap map[string]interface{}
+	err := json.Unmarshal(s, &sourceMap)
+	if err != nil {
+		err = errors.Wrap(err, "unmarshal sourceMap")
+		return err
+	}
+	body, ok := sourceMap["@body"]
+	if !ok {
+		err = errors.New("invalid doc witout `@body` field")
+		return err
+	}
 	
-	return q
+	// body is a row key, unpack it
+	rk, err := UnpackRowKeyByBase64(body.(string))
+	if err != nil {
+		return errors.Wrap(err, "unpack row key by base64")
+	}
+	
+	// fetch hdfs
+	dbName, shard, err := unpackIdxName(hit.Index)
+	if err != nil {
+		return err
+	}
+	dirpath := q.waiter.a.Hdfs.
+		GetDirPath(q.waiter.a.Node.ClusterName.String(), dbName, shard)
+	var rowMap = map[RowKey][]byte{}
+	rowMap[rk]= nil
+	q.logger.Debug(fmt.Sprintf(
+		"resolverows dirpath:%s, rowMap:%+v, esId:%s",
+		dirpath, rowMap, hit.Id))
+	err = q.waiter.a.Hdfs.ResolveRows(dirpath, rowMap)
+	if err != nil {
+		return err
+	}
+	raw := rowMap[rk]
+	
+	// wrap as `Doc`
+	doc := db.Doc{Id:hit.Id, Body:string(raw)}
+	
+	// send to the docs chan
+	select {
+	case q.writeC <- doc:
+	case <- q.ctx.Done():
+		return q.ctx.Err()
+	}
+	return nil
 }
 
 // resolving resolves docs for `hits` and send them to the docsChan
 // caller will get docs by reading the docs chan
 func (q *queryResult) resolving(hits []*elastic.SearchHit) error {
+	count := 0
+	batchWG := utils.NewGroup(q.ctx)
 	for _, hit := range hits {
 		
-		// get `_body`
-		s := []byte(*hit.Source)
-		var sourceMap map[string]interface{}
-		err := json.Unmarshal(s, sourceMap)
-		if err != nil {
-			err = errors.Wrap(err, "unmarshal sourceMap")
-			return err
-		}
-		body, ok := sourceMap["@body"]
-		if !ok {
-			err = errors.New("invalid doc witout `_body` field")
-			return err
+		// start go routine to resolve the hit
+		func(hit *elastic.SearchHit){
+			batchWG.Go(func() error {
+				return q.resolvingOne(hit)
+			})
+		}(hit)
+		count++
+		if count < 10 {
+			continue
 		}
 		
-		// body is a row key, unpack it
-		rk, err := UnpackRowKeyByBase64(body.(string))
-		if err != nil {
-			return errors.Wrap(err, "unpack row key by base64")
-		}
-		
-		// fetch hdfs
-		dbName, shard, err := unpackIdxName(hit.Index)
+		// batch full, wait all task to be done
+		err := batchWG.Wait()
 		if err != nil {
 			return err
 		}
-		dirpath := q.waiter.a.Hdfs.
-			GetDirPath(q.waiter.a.Node.ClusterName.String(), dbName, shard)
-		var rowMap map[RowKey][]byte
-		err = q.waiter.a.Hdfs.ResolveRows(dirpath, rowMap)
-		if err != nil {
-			return err
-		}
-		raw := rowMap[rk]
-		
-		// wrap as `Doc`
-		doc := db.Doc{Id:hit.Id, Body:string(raw)}
-		
-		// send to the docs chan
-		select {
-		case q.docsChan <- doc:
-		case <- q.ctx.Done():
-			return q.ctx.Err()
-		}
+		count = 0
 	}
+	
+	// wait remains to be done
+	err := batchWG.Wait()
+	if err != nil {
+		return err
+	}
+	
 	return nil
 }
 
@@ -137,7 +187,6 @@ func (q *queryResult) scrolling() error {
 		}
 		
 		// resolve hits to docs and send them.
-		// todo: maybe i should start many go routines
 		// to resolve the hits instead of only one
 		err = q.resolving(resp.Hits.Hits)
 		if err != nil {
@@ -149,14 +198,19 @@ exit:
 }
 
 func (q *queryResult) ResultChan() <-chan db.Doc {
-	return q.docsChan
+	return q.readC
+}
+
+func (q *queryResult) Done() <-chan struct {} {
+	return q.doneC
 }
 
 func (q *queryResult) Close() {
 	q.closeOnce.Do(func(){
 		// cancel sub go routines
-		q.cancel()
-		close(q.docsChan)
+		close(q.doneC)
+		q.writeC = nil
+		q.eg.Cancel(nil)
 	})
 }
 
@@ -184,7 +238,9 @@ func (q *simpleQ) FieldEqual(field string, equal string) (db.Query) {
 }
 
 func (q *simpleQ) Do(ctx context.Context) (db.IsQueryResult, error) {
+	logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger).With(zap.String("mod", "Q"))
 	index := getESRDIdx(q.con.waiter.db)
+	logger.Debug(fmt.Sprintf("query idx %s, tags:%v, fields:%v", index, q.tags, q.fields))
 	var qr []elastic.Query
 	if q.tags != nil {
 		tagQuery := elastic.NewTermsQuery("@tag", q.tags...)
@@ -195,7 +251,7 @@ func (q *simpleQ) Do(ctx context.Context) (db.IsQueryResult, error) {
 			qr = append(qr, elastic.NewTermQuery(fi, v))
 		}
 	}
-	sc := elastic.NewFetchSourceContext(true)
+	sc := elastic.NewFetchSourceContext(true).Include("@body", "@tag")
 	sl := q.con.es.Scroll(index).
 		Query(elastic.NewBoolQuery().
 		Must(qr...)).
@@ -245,7 +301,7 @@ func newNativeConnection(
 
 // IsClosed checks if the connection is closed
 func (c *NativeConnection) IsClosed() bool {
-	return atomic.LoadUint32(&c.closed) == uint32(0)
+	return atomic.LoadUint32(&c.closed) == uint32(1)
 }
 
 // Save save the entry to the `ARI`
@@ -255,21 +311,21 @@ func (c *NativeConnection) Save(entry *libs.Entry) error {
 	}
 
 	var ch chan <-*libs.Entry = c.sendC
-	attemptMaximum := 3
-	attempt := 0
+	//attemptMaximum := 3
+	//attempt := 0
 	for {
 		select {
 		case ch <- entry:
 			goto exit
 		case <-c.ctx.Done():
 			return harvesterd.Error{Code: libs.E_DB_CLOSED}
-		default:
-			attempt++
-			if attempt >= attemptMaximum {
-				return harvesterd.Error{Code: libs.E_MAXIMUM_ATTEMPT}
-			}
-			runtime.Gosched()
-			continue
+		//default:
+		//	attempt++
+		//	if attempt >= attemptMaximum {
+		//		return harvesterd.Error{Code: libs.E_MAXIMUM_ATTEMPT}
+		//	}
+		//	runtime.Gosched()
+		//	continue
 		}
 	}
 exit:
@@ -280,7 +336,7 @@ exit:
 // batch write and query db
 type DbWaiter struct {
 	lock        sync.RWMutex
-	wg          utils.WrappedWaitGroup
+	wg          utils.IsGroup
 	a           *Ari
 	db          string
 	dbMeta      DbMeta
@@ -288,7 +344,6 @@ type DbWaiter struct {
 	cons        []*NativeConnection
 	
 	ctx         context.Context
-	cancel      context.CancelFunc
 	logger      *zap.Logger
 	
 	writer      *writer
@@ -315,29 +370,51 @@ func (w *DbWaiter) CheckDbMeta(meta DbMeta) {
 	//}
 }
 
-func (w *DbWaiter) running() {
+func (w *DbWaiter) running() error {
 	// start servicing
 	recvC := (<-chan *libs.Entry) (w.entriesC)
-	w.wg.Wrap(func(){
-		w.pumpingBatch(recvC)
+	
+	// on exiting
+	w.wg.Go(func() error {
+		select {
+		case <-w.ctx.Done():
+		}
+		w.lock.Lock()
+		if w.writer != nil {
+			err := w.writer.Close()
+			w.logger.Debug(fmt.Sprintf("close hdfs writer, err:%+v", err))
+		}
+		w.lock.Unlock()
+		return nil
+	})
+	
+	w.wg.Go(func() error {
+		return w.pumpingBatch(recvC)
 	})
 	// wait my sub goroutines to exit
-	w.wg.Wait()
-	w.a.logger.Info("bye")
+	err := w.wg.Wait()
+	w.logger.Info("bye")
+	
+	// raise err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *DbWaiter) Start(ctx context.Context) error {
-	pWg := ctx.Value(constant.KEY_P_WG).(*utils.WrappedWaitGroup)
+	pWg := ctx.Value(constant.KEY_P_WG).(utils.IsGroup)
 	
 	// init
-	w.ctx, w.cancel = context.WithCancel(ctx)
-	w.ctx = context.WithValue(w.ctx, constant.KEY_P_WG, &w.wg)
+	w.wg = utils.NewGroup(ctx)
+	w.ctx = w.wg.Context()
 	w.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
 		With(zap.String("name", fmt.Sprintf("waiter-%s", w.db)))
+	w.logger.Debug("start")
 	
 	// add to parent wait group
-	pWg.Wrap(func(){
-		w.running()
+	pWg.Go(func() error {
+		return w.running()
 	})
 	
 	return nil
@@ -357,66 +434,65 @@ func (w *DbWaiter) NewConnection() (*NativeConnection) {
 	)
 	
 	w.cons = append(w.cons, con)
-	return nil
+	return con
 }
 
 func (w *DbWaiter) handleBatch(ctx context.Context,
-	batch []*libs.Entry)  {
+	batch []*libs.Entry) error  {
 	
 	if len(batch) == 0 {
-		return
+		return nil
 	}
 	
-	// fixme: handle err
 	writer, err := w.GetWriter()
 	if err != nil {
-		w.logger.Error(fmt.Sprintf("got batch writer err:%v", err))
-		return
+		return errors.Wrap(err, "get writer")
 	}
 	err = writer.Write(ctx, batch)
 	if err != nil {
-		w.logger.Error(fmt.Sprintf("batch writer write err:%v", err))
-		return
+		return errors.Wrap(err, "batch writer write")
 	}
+	return nil
 }
 
 // pumpingBatch receives data and makes batch to send to writer
-func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) {
+func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) error {
 	var entry *libs.Entry
 	var needWrap bool
 	// todo: should with timeout ?
 	// todo: limit maximum handle batch goroutines ?
 	ctx := w.ctx
-	batchMaximum := 1000
+	batchMaximum := 3000
 	batchSizeMaximum := 1 * 1024 * 1024
-	batchTimeDelayMaximum := 30 * time.Second
-	ticker := time.NewTicker(batchTimeDelayMaximum)
-	buf := make([]*libs.Entry, batchMaximum)
-	cur := 0
+	batchTimeDelayMaximum := 10 * time.Second
+	buf := make([]*libs.Entry, 0, batchMaximum)
 	size := 0
+	
+	defer func() {
+		w.logger.Info("pumpingBatch exit")
+	}()
 
 	for {
-		if needWrap && cur > 0 {
+		if needWrap && len(buf) > 0 {
 			// make batch
-			batch := make([]*libs.Entry, cur)
-			copy(batch, buf[:cur])
+			batch := make([]*libs.Entry, len(buf))
+			copy(batch, buf[0:])
 
 			// start new goroutine to handle the batch
-			w.wg.Wrap(func(){
-				w.handleBatch(ctx, batch)
+			w.wg.Go(func() error {
+				return  w.handleBatch(ctx, batch)
 			})
 			// reset buf
-			cur = 0
 			buf = buf[:0]
 			needWrap = false
+			size = 0
 		}
 
 		select {
 		case entry = <- ch:
-			buf[cur] = entry
-			cur++
+			buf = append(buf, entry)
 			size += len(entry.Body)
-			if cur >= batchMaximum {
+			if len(buf) >= batchMaximum {
 				needWrap = true
 				continue
 			}
@@ -424,18 +500,17 @@ func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) {
 				needWrap = true
 				continue
 			}
-		case <-ticker.C:
-			if cur > 0 {
+		case <-time.After(batchTimeDelayMaximum):
+		
+			if len(buf) > 0 {
 				needWrap = true
 				continue
 			}
 		case <-w.ctx.Done():
-			goto exit
+			return w.ctx.Err()
 		}
 	}
-exit:
-	ticker.Stop()
-	w.a.logger.Info("pumpingBatch exit")
+	return nil
 }
 
 // createBatchWriter creates a new writer
@@ -468,6 +543,8 @@ func (w *DbWaiter) createBatchWriter() (*writer, error) {
 //    waiter should create a new writer (holds new shard name and hdfs fd)
 func (w *DbWaiter) GetWriter() (*writer, error) {
 	// get or create a new writer
+	w.lock.Lock()
+	defer w.lock.Unlock()
 	
 	if w.writer == nil {
 		// create writer
@@ -554,7 +631,7 @@ func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
 	bulker := b.getEsBulker()
 	ckBuilder := NewChunkBuilder()
 	for i, et := range batch {
-		if i >= math.MaxInt16 {
+		if i >= math.MaxUint16 {
 			return errors.New("the batch size is too large")
 		}
 		ckBuilder.AddRow([]byte(et.Body))

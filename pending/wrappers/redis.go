@@ -16,9 +16,9 @@ func (m *MyRedis) GetValue(key string, v interface{}) error {
 	if err != nil {
 		return err
 	}
-	err = json.Unmarshal(data, &v)
-	if err != nil {
-		return err
+	er := json.Unmarshal(data, &v)
+	if er != nil {
+		return er
 	}
 	return nil
 }

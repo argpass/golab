@@ -5,7 +5,7 @@ type LoginHandler struct {
 }
 
 func (h *LoginHandler) Handle() error {
-
+	return nil
 }
 
 

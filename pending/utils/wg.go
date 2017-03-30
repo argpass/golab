@@ -1,6 +1,8 @@
 package utils
 
-import "sync"
+import (
+	"sync"
+)
 
 type WrappedWaitGroup struct {
 	sync.WaitGroup
@@ -13,3 +15,4 @@ func (w *WrappedWaitGroup) Wrap(fn func()) {
 		fn()
 	}()
 }
+

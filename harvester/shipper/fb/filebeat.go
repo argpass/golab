@@ -6,10 +6,10 @@ import (
 	"context"
 	"github.com/dbjtech/golab/harvester/libs/constant"
 	"github.com/dbjtech/golab/harvester/libs"
-	"github.com/dbjtech/golab/pending/utils"
 	"net"
 	"fmt"
 	"go.uber.org/zap"
+	"github.com/dbjtech/golab/pending/utils"
 )
 
 func init()  {
@@ -29,17 +29,16 @@ func newFbShipper(name string, cfg *common.Config) (shipper.IsShipper, error) {
 type BeatsShipper struct {
 	name        string
 	cfg         *Config
-	wg          utils.WrappedWaitGroup
+	wg          utils.IsGroup
 	ctx         context.Context
 	logger      *zap.Logger
-	stop        context.CancelFunc
 	sendC       chan []*libs.Entry
-	errorC      chan <-libs.Error
 }
 
-func (s *BeatsShipper) running()  {
-	s.wg.Wait()
+func (s *BeatsShipper) running() error {
+	err := s.wg.Wait()
 	s.logger.Info("bye")
+	return err
 }
 
 func (s *BeatsShipper) ShipOn(
@@ -47,32 +46,33 @@ func (s *BeatsShipper) ShipOn(
 		ctx context.Context) error {
 	
 	// init
-	parentWG := ctx.Value(constant.KEY_P_WG).(*utils.WrappedWaitGroup)
+	parentWG := ctx.Value(constant.KEY_P_WG).(utils.IsGroup)
 	logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
 	logger = logger.With(zap.String("mod", s.name))
 	ctx = context.WithValue(ctx, constant.KEY_LOGGER, logger)
-	s.errorC = ctx.Value(constant.KEY_ERRORS_W_CHAN).(chan <- libs.Error)
 	s.logger = logger
-	s.ctx, s.stop = context.WithCancel(ctx)
 	
-	s.wg.Wrap(func(){
+	s.wg = utils.NewGroup(ctx)
+	s.ctx = s.wg.Context()
+	
+	s.wg.Go(func() error {
 		for {
 			select {
-			case <-ctx.Done():
-				goto exit
+			case <-s.ctx.Done():
+				return s.ctx.Err()
 			case ets := <-s.sendC:
 				// send entries to the sendC
 				for _, et := range ets {
 					select {
-					case <-ctx.Done():
-						goto exit
+					case <-s.ctx.Done():
+						return s.ctx.Err()
 					case sendC <- et:
 						// pass
 					}
 				}
 			}
 		}
-		exit:
+		return nil
 	})
 	
 	// start tcp server for `filebeats`
@@ -82,19 +82,20 @@ func (s *BeatsShipper) ShipOn(
 		return err
 	}
 	handler := &tcpServer{sendC:s.sendC}
-	s.wg.Wrap(func() {
+	s.wg.Go(func() error {
 		select {
 		case <-s.ctx.Done():
 			err := tcpListener.Close()
 			s.logger.Info(fmt.Sprintf("listener closed, err:%+v", err))
 		}
+		return nil
 	})
-	s.wg.Wrap(func(){
-		RunTCPServer(s.ctx, tcpListener.(*net.TCPListener), handler)
+	s.wg.Go(func() error {
+		return RunTCPServer(s.ctx, tcpListener.(*net.TCPListener), handler)
 	})
 	
-	parentWG.Wrap(func(){
-		s.running()
+	parentWG.Go(func() error {
+		return s.running()
 	})
 	
 	return nil

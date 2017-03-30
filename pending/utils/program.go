@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"runtime"
 	"expvar"
+	"context"
 )
 
 
@@ -19,9 +20,13 @@ type IsProgram interface {
 	// Start the program
 	Start() error
 	
+	Context() context.Context
+	
+	Err() error
+	
 	// WaitStop block to wait the program to exit
 	// only triggered by un ignored os signals
-	StoppedBySignals(sigs... os.Signal) error
+	Stop(err error, sigs... os.Signal)
 }
 
 // RunProgram bootstraps a program
@@ -35,8 +40,14 @@ func RunProgram(program IsProgram, sigs... os.Signal) error {
 	}
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, sigs...)
-	<-ch
-	err = program.StoppedBySignals(sigs...)
+	select {
+	case <-program.Context().Done():
+		program.Stop(program.Context().Err())
+		return program.Err()
+	case sig := <-ch:
+		program.Stop(nil, sig)
+		return program.Err()
+	}
 	return err
 }
 

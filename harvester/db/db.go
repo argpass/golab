@@ -5,7 +5,6 @@ import (
 	"context"
 	"github.com/dbjtech/golab/harvester/libs"
 	"go.uber.org/zap"
-	"github.com/dbjtech/golab/pending/utils"
 	"github.com/dbjtech/golab/harvester/libs/constant"
 	"fmt"
 	"sync"
@@ -17,15 +16,12 @@ var _ libs.Starter = &DBService{}
 // DBService manages all enabled engines
 type DBService struct {
 	lock            sync.RWMutex
-	wg              utils.WrappedWaitGroup
 	
 	enabledEngines  map[string]IsEngine
 	RawConfig       *common.Config
 	cfg             Config
 	
 	logger          *zap.Logger
-	ctx             context.Context
-	cancel          context.CancelFunc
 }
 
 // Start the db service and enable configured engines
@@ -33,7 +29,6 @@ func (d *DBService) Start(ctx context.Context) error {
 	// init
 	d.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
 		With(zap.String("mod", "db"))
-	d.ctx, d.cancel = context.WithCancel(ctx)
 	
 	// enable engines with `db.engine` config field
 	if d.RawConfig.HasField("engine") {
@@ -41,7 +36,7 @@ func (d *DBService) Start(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = d.enableEngines(enginesConfig)
+		err = d.enableEngines(enginesConfig, ctx)
 		if err != nil {
 			return err
 		}
@@ -93,7 +88,7 @@ func (d *DBService) Open(db string) (IsDBCon, error) {
 	return nil, fmt.Errorf("db(%s) hasn't been configured yet", db)
 }
 
-func (d *DBService) enableEngines(enginesConfig *common.Config) error {
+func (d *DBService) enableEngines(enginesConfig *common.Config, ctx context.Context) error {
 	for _, name := range enginesConfig.GetFields() {
 		enCreator, exists := GetEngine(name)
 		if !exists {
@@ -104,7 +99,7 @@ func (d *DBService) enableEngines(enginesConfig *common.Config) error {
 			return errors.Wrap(err, "pick engine config")
 		}
 		// create and start an engine instance
-		d.enabledEngines[name], err = enCreator(name, cf, d.ctx)
+		d.enabledEngines[name], err = enCreator(name, cf, ctx)
 		if err != nil {
 			return errors.Wrapf(err, "enable engine - %s", name)
 		}

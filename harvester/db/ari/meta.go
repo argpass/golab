@@ -35,7 +35,7 @@ type DbMeta struct {
 
 func NewShardMeta() *ShardMeta {
 	createAt := time.Now().Unix()
-	name := fmt.Sprintf("%s", createAt)
+	name := fmt.Sprintf("%d", createAt)
 	s := &ShardMeta{
 		Name:name,CreateAt:createAt,
 		FdLocked:map[int]string{}, MaxFd:math.MaxUint16,

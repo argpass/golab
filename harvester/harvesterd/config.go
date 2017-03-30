@@ -1,9 +1,9 @@
 package harvesterd
 
 type DbRouting struct {
-	SaveToDb    string      `json:"save_to_db"`
+	SaveToDb    string      `config:"save_to_db"`
 }
 
 type Config struct {
-	TypeRouting   map[string]DbRouting  `json:"type_routing"`
+	TypeRouting   map[string]DbRouting  `config:"type_routing"`
 }

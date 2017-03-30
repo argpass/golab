@@ -16,13 +16,16 @@ type TCPHandler interface {
 	Handle(context.Context, net.Conn)
 }
 
-func RunTCPServer(ctx context.Context, listener *net.TCPListener, handler TCPHandler)  {
+func RunTCPServer(ctx context.Context, listener *net.TCPListener, handler TCPHandler)  error {
 	logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
 	logger.Info(fmt.Sprintf("listen on:%s", listener.Addr()))
+	
+	defer logger.Info(fmt.Sprintf("closing %s", listener.Addr()))
+	
 	for {
 		select {
 		case <-ctx.Done():
-			goto exit
+			return ctx.Err()
 		default:
 		}
 		con, err := listener.Accept()
@@ -43,19 +46,17 @@ func RunTCPServer(ctx context.Context, listener *net.TCPListener, handler TCPHan
 			select {
 			case <-ctx.Done():
 				// listener closed
-				goto exit
+				return ctx.Err()
 			default:
 				// errors that can't be ignored, exit
 				logger.Error(fmt.Sprintf("Accept() error:%s", err))
-				goto exit
+				return err
 			}
 		}
 		// start a routine to handle the connection
 		go handler.Handle(ctx, con)
 	}
-	// i'm dead
-exit:
-	logger.Info(fmt.Sprintf("closing %s", listener.Addr()))
+	return nil
 }
 
 // tcpServer is a simple `TCPHandler` implement
