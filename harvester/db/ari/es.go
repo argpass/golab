@@ -8,7 +8,32 @@ import (
 	"bytes"
 	"text/template"
 	"github.com/dbjtech/golab/harvester/libs"
+	"strings"
+	"fmt"
+	"net/http"
+	"io/ioutil"
 )
+
+type ESPort struct {
+	*elastic.Client
+	Addrs []string
+}
+
+func NewESPort(addrs ...string) (*ESPort, error) {
+	p := &ESPort{}
+	c, err := elastic.NewClient(elastic.SetURL(addrs...))
+	if err != nil {
+		return nil, errors.Wrap(err, "new es client")
+	}
+	p.Client = c
+	p.Addrs = append(p.Addrs, addrs...)
+	return p, nil
+}
+
+func (p *ESPort) ReadIndexInfo(index string) (IdxInfo, error) {
+	// todo: load balances
+	return readIdxInfo(index, p.Addrs[0])
+}
 
 func appendValue(buf []byte, value libs.Value) []byte {
 	if value.Type == libs.ValueTypes.STR {
@@ -116,3 +141,70 @@ func EnsureIndex(ctx context.Context, db string, index string, c *elastic.Client
 	}
 	return nil
 }
+
+type IdxInfo struct {
+	Name        string
+	Hash        string
+	RepoNum     int
+	PriNum      int
+	DocCount    int
+	DelCount    int
+	StoreSizeG  float32
+	PriSizeG    float32
+}
+
+// readIdxInfo reads index base info
+func readIdxInfo(index string, urlBase string) (IdxInfo, error)  {
+	var info IdxInfo
+	var err error
+	url := fmt.Sprintf("%s/_cat/indices/%s", urlBase, index)
+	resp, err := http.Get(url)
+	if err != nil {
+		return info, errors.Wrap(err, "cat index")
+	}
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return info, errors.Wrap(err, "read body")
+	}
+	
+	// result format example:
+	//
+	// health status index                                 uuid                   pri rep docs.count docs.deleted store.size pri.store.size
+	// yellow open   ari.db_live_evt.%!s(int64=1490337739) 3xEg4oRmT1Wy7MxtSlxNLw   4   1          0            0       636b           636b
+	sp := strings.Split(string(data), " ")
+	info.Name, info.Hash = sp[2], sp[3]
+	PriNum, _ := strconv.ParseInt(sp[4], 10, 32)
+	RepoNum, _ := strconv.ParseInt(sp[5], 10, 32)
+	docCount, _ := strconv.ParseInt(sp[6], 10, 32)
+	delCount, _ := strconv.ParseInt(sp[7], 10, 32)
+	storeSize, err := roundSizeGB(sp[8])
+	if err != nil {
+		return info, err
+	}
+	priSize, err := roundSizeGB(sp[9])
+	if err != nil {
+		return info, err
+	}
+	
+	info.PriNum, info.RepoNum, info.DocCount, info.DelCount = int(PriNum),
+		int(RepoNum), int(docCount), int(delCount)
+	info.StoreSizeG, info.PriSizeG = storeSize, priSize
+	
+	return info, nil
+}
+
+// roundSizeGB parses size string to int
+// all `mb` `kb` `b` units will be ignored
+// 1.8gb => 1.8
+func roundSizeGB(s string) (float32, error) {
+	if strings.HasSuffix(s, "gb") {
+		s = strings.TrimSuffix(s, "gb")
+		size, err := strconv.ParseFloat(s, 32)
+		if err != nil {
+			return 0, errors.Wrap(err, "parse size")
+		}
+		return float32(size), nil
+	}
+	return 0, nil
+}
+

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"encoding/json"
 	"github.com/pkg/errors"
+	"strings"
 )
 
 const (
@@ -178,7 +179,7 @@ func (q *queryResult) scrolling() error {
 		resp, err := q.sl.Do(q.ctx)
 		if err != nil {
 			// no more documents
-			if err.Error() == "EOF" {
+			if strings.EqualFold(err.Error(), "EOF") {
 				goto exit
 			}else{
 				err = errors.Wrap(err, "scroll err")
@@ -429,7 +430,7 @@ func (w *DbWaiter) NewConnection() (*NativeConnection) {
 		(chan <-*libs.Entry)(w.entriesC),
 		w.ctx,
 		conId,
-		w.a.ES,
+		w.a.ES.Client,
 		w,
 	)
 	
@@ -532,7 +533,7 @@ func (w *DbWaiter) createBatchWriter() (*writer, error) {
 		return nil, err
 	}
 	
-	return newBatchWriter(w.db, w.dbMeta.HotShard,appender, w.a.ES), nil
+	return newBatchWriter(w.db, w.dbMeta.HotShard,appender, w.a.ES.Client), nil
 }
 
 // GetWriter returns a writer to write the entries

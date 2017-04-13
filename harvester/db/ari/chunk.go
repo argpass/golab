@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"github.com/pkg/errors"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -132,7 +133,7 @@ func (c *Chunk) ResolveRows(serialsMap map[uint16][]byte) error {
 	for i:=0; ;i++ {
 		rowLen, err := binary.ReadUvarint(hdReader)
 		if err != nil {
-			if err.Error() == "EOF" {
+			if strings.EqualFold(err.Error(),"EOF") {
 				break
 			}
 			return errors.Wrap(err, "read chunk's data uvarint")
@@ -176,7 +177,7 @@ func ReadChunk(reader io.Reader) (*Chunk, error) {
 	chunk := &Chunk{}
 	err := binary.Read(reader, binary.BigEndian, &chunk.CKHeader)
 	if err != nil {
-		if err.Error() == "EOF" {
+		if strings.EqualFold(err.Error(), "EOF") {
 			return nil, nil
 		}
 		return nil, errors.Wrap(err, "read chunk header")

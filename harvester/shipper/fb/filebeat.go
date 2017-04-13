@@ -22,6 +22,7 @@ func newFbShipper(name string, cfg *common.Config) (shipper.IsShipper, error) {
 	if err != nil {
 		return nil, err
 	}
+	
 	var s shipper.IsShipper = newBeatsShipper(name, &myCf)
 	return s, nil
 }

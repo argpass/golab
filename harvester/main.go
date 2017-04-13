@@ -177,27 +177,27 @@ func (p *program) Start() error {
 	p.logger.Debug("start db done")
 	
 	// todo-remove
-	gp.Go(func() error {
-		return nil
-		con, err := dbService.Open("db_8")
-		if err != nil {
-			return errors.Wrap(err, "open db_8")
-		}
-		resutl, err := con.Query().WithTag("mock").Do(ctx)
-		if err != nil {
-			return errors.Wrap(err, "do query")
-		}
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-resutl.Done():
-				return nil
-			case doc := <-resutl.ResultChan():
-				fmt.Printf("doc:%v\n", doc)
-			}
-		}
-	})
+	//gp.Go(func() error {
+	//	return nil
+	//	con, err := dbService.Open("db_8")
+	//	if err != nil {
+	//		return errors.Wrap(err, "open db_8")
+	//	}
+	//	result, err := con.Query().WithTag("mock").Do(ctx)
+	//	if err != nil {
+	//		return errors.Wrap(err, "do query")
+	//	}
+	//	for {
+	//		select {
+	//		case <-ctx.Done():
+	//			return ctx.Err()
+	//		case <-result.Done():
+	//			return nil
+	//		case doc := <-result.ResultChan():
+	//			fmt.Printf("doc:%v\n", doc)
+	//		}
+	//	}
+	//})
 	
 	// 5.harvesterd
 	// entries channel

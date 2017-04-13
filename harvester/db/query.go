@@ -16,19 +16,17 @@ type Doc struct {
 //	defer result.Close()
 //	for {
 //		select {
-//		case doc, ok := <-result.ResultChan():
-//			if !ok {
-//				// check error
-//				if result.Err() != nil {
-//					// handle err
-//				}else{
-//					// now no more docs
-//					break
-//				}
-//			}
+//      case <-ctx.Done():
+//          // cancelled
+//          goto exit
+//      case <-result.Done():
+//          // no more
+//          goto exit
+//		case doc := <-result.ResultChan():
 //			// handle the doc
 //		}
 //	}
+// exit:
 //
 type IsQueryResult interface {
 	ResultChan() <- chan Doc
@@ -37,9 +35,16 @@ type IsQueryResult interface {
 	Close()
 }
 
+// Query interface
 type Query interface {
-	WithTag(tag string) (Query)
-	FieldEqual(field string, equal string) (Query)
+	
+	// WithTag fetch docs with some tag
+	WithTag(tag string) Query
+	
+	// FieldEqual fetch docs that `field`=`equal`
+	FieldEqual(field string, equal string) Query
+	
+	// Do query process
 	Do(ctx context.Context) (IsQueryResult, error)
 }
 

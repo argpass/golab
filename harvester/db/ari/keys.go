@@ -8,6 +8,7 @@ import (
 
 
 func getEsRawIdx(db string, shard string) string {
+	// index name: `ari.{db_name}.{shard_name}`
 	index := fmt.Sprintf("ari.%s.%s", db, shard)
 	return index
 }
@@ -23,6 +24,7 @@ func unpackIdxName(idx string) (db string, shard string, err error) {
 }
 
 func getESRDIdx(db string) string {
+	// index reading alias: `ari.{db_name}_r`
 	index := fmt.Sprintf("ari.%s_r", db)
 	return index
 }

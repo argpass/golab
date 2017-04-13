@@ -13,6 +13,7 @@ import (
 	"github.com/dbjtech/golab/harvester/libs/constant"
 	"go.uber.org/zap"
 	"github.com/dbjtech/golab/harvester/libs"
+	"strings"
 )
 
 // ConvertToEntries converts log rows to entries
@@ -48,7 +49,7 @@ type Message struct {
 func (m Message) Pack() ([]byte, error) {
 	buf := make([]byte, int(m.Size) + 12)
 	binary.BigEndian.PutUint32(buf, m.Size)
-	binary.BigEndian.PutUint64(buf, m.MsgID)
+	binary.BigEndian.PutUint64(buf[4:], m.MsgID)
 	n := copy(buf[12:], m.Data)
 	if n != int(m.Size) {
 		return nil, errors.New("invalid message size")
@@ -85,6 +86,12 @@ func (l *looperV1) IOLoop(
 		con.SetReadDeadline(time.Now().Add(3 * time.Second))
 		err = binary.Read(con, binary.BigEndian, &msg.MessageHeader)
 		if err != nil {
+			if strings.EqualFold(err.Error(), "EOF") {
+				err = nil
+				logger.Info("con closed")
+				goto exit
+			}
+			
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout(){
 				// read timeout, next
 				runtime.Gosched()
@@ -93,7 +100,6 @@ func (l *looperV1) IOLoop(
 			// read err
 			goto exit
 		}
-		
 		// todo: never to timeout but how to got exit signal ?
 		// never timeout
 		con.SetReadDeadline(time.Time{})
@@ -107,6 +113,7 @@ func (l *looperV1) IOLoop(
 		var bulk Bulk
 		err := proto.Unmarshal(msg.Data, &bulk)
 		if err != nil {
+			logger.Info(fmt.Sprintf("unmarshal err:%v", err))
 			invalidCounter += 1
 			if invalidCounter > 3 {
 				err = errors.New(fmt.Sprintf("read %d times invalid protobuf buffer, " +
@@ -117,12 +124,13 @@ func (l *looperV1) IOLoop(
 		}
 
 		entries := ConvertToEntries(bulk.GetRows())
-
+		//logger.Debug(fmt.Sprintf(">>> entries count :%d", len(entries)))
 		select {
 		case <-ctx.Done():
 			goto exit
 		case sendC <- entries:
 		    // todo: entries accepted so we should send ACK to the client
+		    //logger.Debug(fmt.Sprintf("send entries count %d", len(entries)))
 		    continue
 		}
 	}

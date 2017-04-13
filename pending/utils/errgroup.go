@@ -4,6 +4,7 @@ import (
 	"sync"
 	
 	"golang.org/x/net/context"
+	"fmt"
 )
 
 type IsGroup interface {
@@ -29,6 +30,9 @@ type group struct {
 
 func (g *group) Cancel(err error) {
 	g.errOnce.Do(func() {
+		if err != nil {
+			fmt.Printf("cancelled with err:%+v\n", err)
+		}
 		g.err = err
 		if g.cancel != nil {
 			g.cancel()

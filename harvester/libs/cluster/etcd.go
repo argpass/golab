@@ -22,25 +22,6 @@ type Watcher interface {
 	Watch(ctx context.Context, resp *clientv3.GetResponse, ch clientv3.WatchChan) error
 }
 
-//type singleValueAware struct {
-//	value interface{}
-//	key string
-//	decodeFn func([]byte, v interface{}) error
-//	encodeFn func(v interface{}) ([]byte, error)
-//}
-//
-//func (v *singleValueAware) Bind(resp *clientv3.GetResponse, ch clientv3.WatchChan) error {
-//	for _, r := range resp.Kvs {
-//		if string(r.Key) == v.key {
-//
-//			r.Value
-//		}
-//	}
-//	if len(resp.Kvs) > 0 {
-//	}
-//}
-
-
 type Etcd3 struct {
 	*clientv3.Client
 }

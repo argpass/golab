@@ -4,7 +4,6 @@ import (
 	"sync"
 	"context"
 	"fmt"
-	"github.com/olivere/elastic"
 	"github.com/colinmarc/hdfs"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/dbjtech/golab/harvester/db"
@@ -20,8 +19,9 @@ import (
 	"strings"
 	"strconv"
 	"github.com/coreos/etcd/clientv3"
-	"time"
 	"github.com/dbjtech/golab/pending/utils"
+	"time"
+	"runtime"
 )
 
 func init()  {
@@ -68,7 +68,7 @@ type Ari struct {
 	ctx    context.Context
 	logger *zap.Logger
 	Node   *cluster.Node
-	ES     *elastic.Client
+	ES     *ESPort
 	Hdfs   *HdfsPort
 	
 	masterCtx   context.Context
@@ -112,6 +112,16 @@ func New(name string, cfg *common.Config) (*Ari, error)  {
 		NotifyFn:func(evt string) {a.onMetaChanged(evt)},
 	}
 	return a, nil
+}
+
+func (a *Ari) cleanMeta() error {
+	key := a.getMetaKey()
+	_, err := a.Node.Etcd3.Delete(a.ctx, key)
+	if err != nil {
+		return errors.Wrap(err, "delete meta")
+	}
+	a.logger.Info("delete meta success")
+	return nil
 }
 
 // initHandlers registers master handlers
@@ -288,6 +298,7 @@ func (a *Ari) Start(ctx context.Context) error {
 		map[string]cluster.IsKeyWatcher{
 			dbMetaKey:a.metaViewer,
 		})
+	// now w initialized, a.metaViewer is also initialized
 	err = a.Node.Etcd3.Watch(a.ctx, dbMetaKey, w)
 	if err != nil {
 		return errors.Wrap(err, "watch db meta key")
@@ -296,18 +307,22 @@ func (a *Ari) Start(ctx context.Context) error {
 	a.initHandlers()
 	a.logger.Debug("init handlers done")
 	
-	// register master tasks
-	a.Node.RegMasterTask(
-		cluster.MakeMasterTask(
-			a.ctx, "ari_master",
-			func(ctx context.Context){
-				a.runningInMasterTask(ctx)
-			},
-		),
-	)
+	// ensure metas initialized
+	defaultMeta := Meta{}
+	data , _ := json.Marshal(defaultMeta)
+	resp, _:= a.Node.Etcd3.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(dbMetaKey), ">", 0)).
+		Else(clientv3.OpPut(dbMetaKey, string(data))).Commit()
+	if !resp.Succeeded {
+		a.logger.Debug("i init the meta")
+		
+		// update local meta immediately
+		// instead of waiting for etcd notification
+		a.metaViewer.OnCreate(data)
+	}
 	
-	// es, hdfs client
-	a.ES, err = elastic.NewClient(elastic.SetURL(a.cfg.ES.Addrs...))
+	// es port, hdfs port
+	a.ES, err = NewESPort(a.cfg.ES.Addrs...)
 	//a.logger.Warn(fmt.Sprintf("es addrs:%v", a.cfg.ES.Addrs))
 	if err != nil {
 		a.logger.Error(fmt.Sprintf("fail to new client of es, err:%v", err))
@@ -319,10 +334,33 @@ func (a *Ari) Start(ctx context.Context) error {
 		return err
 	}
 	a.Hdfs = &HdfsPort{Client: hd}
+	a.logger.Debug("es hdfs connected")
+	
+	// register master tasks
+	// task will run immediately if i'm the master node
+	a.Node.RegMasterTask(
+		cluster.MakeMasterTask(
+			a.ctx, "ari_master",
+			func(ctx context.Context){
+				a.checkBusyFds(ctx)
+			},
+		),
+	)
+	a.logger.Debug("reg ari_master")
+	a.Node.RegMasterTask(
+		cluster.MakeMasterTask(
+			a.ctx, "ari_sharding",
+			func(ctx context.Context) {
+				a.shardTask(ctx)
+			},
+		),
+	)
+	a.logger.Debug("reg master task done")
 	
 	pWG.Go(func() error {
 		return a.running()
 	})
+	a.logger.Debug("startted")
 	return nil
 }
 
@@ -341,7 +379,7 @@ func (a *Ari) running() error {
 
 func (a *Ari) Fatal(err error, msg string)  {
 	// cancel self
-	a.logger.Error(fmt.Sprintf("fatal err:%+v, msg:%s", err, msg))
+	a.logger.Error(fmt.Sprintf("fatal err:%+v\n, msg:%s", err, msg))
 	a.wg.Cancel(err)
 }
 
@@ -380,8 +418,6 @@ func (a *Ari) GetMeta() *Meta {
 	}
 	m, ok := v.(*Meta)
 	if !ok {
-		// use check type, if not expected type, log error and fatal
-		//a.Fatal(fmt.Errorf("Get Unspected meta type:%s not (*Meta)", m), "")
 		return nil
 	}
 	return m
@@ -413,31 +449,130 @@ func unpackFdKey(prefix string, rawKey string) (db string, shard string, fd int,
 	return
 }
 
-func (a *Ari) runningInMasterTask(ctx context.Context)  {
+// splitNewIndex creates a new shard index and add to meta
+func (a *Ari) splitNewIndex(ctx context.Context, meta *DbMeta) error  {
+	shardMet := NewShardMeta()
+	index := getEsRawIdx(meta.Name, shardMet.Name)
+	err := EnsureIndex(ctx, meta.Name, index, a.ES.Client)
+	if err != nil {
+		return err
+	}
+	meta.Shards[shardMet.Name] = shardMet
+	return nil
+}
+
+func (a *Ari) shardTask(ctx context.Context) {
+	wg := utils.NewGroup(ctx)
+	wg.Go(func() error {
+		return a.shardingTask(wg.Context())
+	})
+	
+	a.wg.Go(func() error {
+		err := wg.Wait()
+		return err
+	})
+}
+
+// shardTask check sharding condition and auto sharding
+func (a *Ari) shardingTask(ctx context.Context) (err error) {
+	a.logger.Debug("sharding task start")
+	defer a.logger.Info("sharding task bye")
+	for {
+		// wait a moment
+		runtime.Gosched()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(10 * time.Second):
+			// to check per 10 seconds
+		}
+		
+		// check once
+		meta := a.GetMeta()
+		if meta == nil {
+			continue
+		}
+		
+		var needUpdate bool
+		for dbName, dbMeta := range meta.Dbs {
+			if dbMeta == nil {
+				continue
+			}
+			po, err := dbMeta.Options.ShardPolicy.ParsePolicy()
+			if err != nil {
+				a.Fatal(err, "invalid policy format")
+				return err
+			}
+			hotShardMeta, ok := dbMeta.Shards[dbMeta.HotShard]
+			if !ok {
+				return errors.New(fmt.Sprintf(
+					"no such hot shard %s in db %s, invalid db meta:%+v",
+					dbMeta.HotShard, dbMeta.Name, *dbMeta))
+			}
+			
+			// check duration
+			if po.MaxDuration > 0 {
+				t := time.Unix(hotShardMeta.CreateAt, 0)
+				if time.Now().After(t.Add(po.MaxDuration)) {
+					a.logger.Info(fmt.Sprintf(
+						"db `%s` shard `%s` max duration exceed",
+						dbMeta.Name, dbMeta.HotShard))
+					err := a.splitNewIndex(ctx, dbMeta)
+					if err != nil {
+						a.Fatal(err, "split new index on max duration exceed")
+						return err
+					}
+					needUpdate = true
+				}
+			}
+			
+			// check max index size
+			if po.MaxIndexSize > 0 {
+				idxName := getEsRawIdx(dbName, hotShardMeta.Name)
+				info, err := a.ES.ReadIndexInfo(idxName)
+				if err != nil {
+					a.Fatal(err, "read index info")
+					return err
+				}
+				if info.PriSizeG >= float32(po.MaxIndexSize) {
+					a.logger.Info(fmt.Sprintf(
+						"db %s shard `%s` max size exceed",
+						dbMeta.Name, dbMeta.HotShard))
+					err := a.splitNewIndex(ctx, dbMeta)
+					if err != nil {
+						a.Fatal(err, "split new index on max size exceed")
+						return err
+					}
+					needUpdate = true
+				}
+			}
+		}
+		
+		// check if need to update meta
+		if needUpdate {
+			dbMetaKey := a.getMetaKey()
+			// update to etcd
+			data, _ := json.Marshal(meta)
+			_, err := a.Node.Etcd3.Put(ctx, dbMetaKey, string(data))
+			if err != nil {
+				a.Fatal(errors.Wrap(err, "[sharding] put meta to etcd"), "")
+				return err
+			}
+		}
+	}
+}
+
+func (a *Ari) checkBusyFds(ctx context.Context)  {
 	
 	clusterName := a.Node.ClusterName.String()
 	busyFdPrefix := fmt.Sprintf("%s.ari.busy_fd.", clusterName)
 	dbMetaKey := a.getMetaKey()
 	
-	// ensure metas initialized
-	defaultMeta := Meta{}
-	data , _ := json.Marshal(defaultMeta)
-	resp, _:= a.Node.Etcd3.Txn(ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(dbMetaKey), ">", 0)).
-	    Else(clientv3.OpPut(dbMetaKey, string(data))).Commit()
-	if !resp.Succeeded {
-		a.logger.Debug("i init the meta")
-		
-		// fixme: wait by node state instead of fabricated time
-		// wait all nodes recv new meta
-		time.Sleep(2 * time.Second)
-	}
-	
-	// keep metas valid
+	// keep metas valid,
 	// check busy fds: {cluster}.ari.busy_fd.{db}.{shard}.{fd}
 	w := cluster.NewKeysWatcher(
 		
-		// check meta with busy fds in level init
+		// check meta with busy fds init level
 		func(kvs []*mvccpb.KeyValue){
 			var fdMap = map[string]map[string]map[int]string{}
 			for _, kv := range kvs {
@@ -475,8 +610,9 @@ func (a *Ari) runningInMasterTask(ctx context.Context)  {
 			data, _ := json.Marshal(metas)
 			_, err := a.Node.Etcd3.Put(ctx, dbMetaKey, string(data))
 			if err != nil {
-				// todo: handle err
-				a.logger.Error(fmt.Sprintf("put meta to etcd err:%v", err))
+				//a.logger.Error(fmt.Sprintf("put meta to etcd err:%v", err))
+				a.Fatal(errors.Wrap(err, "[check-busyfd] put meta to etcd"), "")
+				return
 			}
 		},
 		
@@ -523,8 +659,8 @@ func (a *Ari) runningInMasterTask(ctx context.Context)  {
 			data, _ := json.Marshal(metas)
 			_, err = a.Node.Etcd3.Put(ctx, dbMetaKey, string(data))
 			if err != nil {
-				// todo: handle err
-				a.logger.Error(fmt.Sprintf("put meta to etcd err:%v", err))
+				//a.logger.Error(fmt.Sprintf("put meta to etcd err:%v", err))
+				a.Fatal(errors.Wrap(err, "[check-busyfd2] put meta to etcd"), "")
 				return
 			}
 		},
@@ -614,7 +750,7 @@ func (a *Ari) Ensure(db string, cfg *common.Config) error {
 	
 	dbMeta := GetInitialDbMeta(db, opts)
 	rawIdx := getEsRawIdx(dbMeta.Name, dbMeta.HotShard)
-	err = EnsureIndex(a.ctx, dbMeta.Name, rawIdx, a.ES)
+	err = EnsureIndex(a.ctx, dbMeta.Name, rawIdx, a.ES.Client)
 	if err != nil {
 		return err
 	}

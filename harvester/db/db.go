@@ -26,6 +26,7 @@ type DBService struct {
 
 // Start the db service and enable configured engines
 func (d *DBService) Start(ctx context.Context) error {
+	
 	// init
 	d.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
 		With(zap.String("mod", "db"))
@@ -57,7 +58,9 @@ func ( d*DBService) ensureDbs() error {
 	for _, db := range d.cfg.Databases {
 		en, ok := d.enabledEngines[db.Engine]
 		if !ok {
-			return fmt.Errorf("engine %s not found", db.Engine)
+			return fmt.Errorf(
+				"engine %s not found",
+				db.Engine)
 		}
 		err := en.Ensure(db.Name, db.EgConfig)
 		if err != nil {

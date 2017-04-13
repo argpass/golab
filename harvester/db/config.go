@@ -9,5 +9,5 @@ type DatabaseConfig struct {
 }
 
 type Config struct {
-	Databases   []DatabaseConfig  `config:"databases"`
+	Databases   []DatabaseConfig    `config:"databases"`
 }

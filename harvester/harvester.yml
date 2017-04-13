@@ -12,15 +12,13 @@ cluster:
 # fb shipper config.
 # we can start various fb shippers to receive various filebeats' beats
 shipper.fb:
-# shipper name
-- name: "fb_eventer"
   # tcp address
-  addr: ":9736"
+  addr: "localhost:9735"
   # override doc_type if you need to do that
   #override_doc_type: ~
 
-shipper.mock:
-- name: "mock shipper"
+#shipper.mock:
+#- name: "mock shipper"
 
 #============================== db        ==============================#
 #------------------------------ engines   ------------------------------#
