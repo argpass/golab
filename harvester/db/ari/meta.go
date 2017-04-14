@@ -43,7 +43,11 @@ func NewShardMeta() *ShardMeta {
 	return s
 }
 
-func GetInitialDbMeta(db string, ops DBOptions) *DbMeta {
+func GetInitialDbMeta(db string, ops DBOptions) (*DbMeta, error) {
+	err :=  ops.Validate()
+	if err != nil {
+		return nil, err
+	}
 	defaultShard := NewShardMeta()
 	m := &DbMeta{
 		Shards:map[string]*ShardMeta{defaultShard.Name:defaultShard},
@@ -52,7 +56,7 @@ func GetInitialDbMeta(db string, ops DBOptions) *DbMeta {
 		CreateAt:defaultShard.CreateAt,
 		Options:ops,
 	}
-	return m
+	return m, nil
 }
 
 // Meta holds engine meta information

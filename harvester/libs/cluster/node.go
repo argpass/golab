@@ -438,12 +438,14 @@ func (n *Node) CallMaster(
 		return nil, errors.New("invalid rpc client")
 	}
 	req := &pb.Req{Namespace:namespace,Key:key,ReqBuf:reqBuf, Node:&n.nodeInfo}
+	n.logger.Debug(fmt.Sprintf("rpc send call req :%v", *req))
 	return c.Call(ctx, req)
 }
 
 // Call implement rpc server.
 // to keep consistent with the rpc server interface always.
 func (n *Node) Call(ctx context2.Context, req *pb.Req) (*pb.Resp, error) {
+	n.logger.Debug(fmt.Sprintf("rpc call get req :%v", *req))
 	if !n.IsMaster() {
 		return &pb.Resp{Status:-1, Msg:"i'm not master"},
 			errors.New("call on nonmaster node")
@@ -451,6 +453,7 @@ func (n *Node) Call(ctx context2.Context, req *pb.Req) (*pb.Resp, error) {
 	k := fmt.Sprintf("%s.%s", req.Namespace, req.Key)
 	n.lock.RLock()
 	handle, ok := n.callHandles[k]
+	n.logger.Debug(fmt.Sprintf("get handler:%v", handle))
 	n.lock.RUnlock()
 	if !ok {
 		// no handler found to handle this request

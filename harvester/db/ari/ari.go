@@ -267,7 +267,7 @@ func (a *Ari) initHandlers()  {
 				return &resp
 			}
 			
-			return nil
+			return &resp
 		},
 	)
 }
@@ -386,6 +386,7 @@ func (a *Ari) Fatal(err error, msg string)  {
 ///////////////////////////////// db meta ///////////////////////////////
 
 func (a *Ari) onMetaChanged(evt string) {
+	a.logger.Debug(fmt.Sprintf("meta changed evt:%s", evt))
 	// if meta deleted, all db dropped, close all waiters
 	if evt == "DELETE" {
 		a.Fatal(errors.New("meta deleted"), "")
@@ -399,6 +400,7 @@ func (a *Ari) onMetaChanged(evt string) {
 	
 	if evt == "CREATE" || evt == "UPDATE" {
 		// notify all waiters to check db meta
+		a.logger.Debug("notify all waiters to update metas")
 		a.lock.Lock()
 		for dbName, wt := range a.waiters {
 			m, ok := meta.Dbs[dbName]
@@ -449,7 +451,7 @@ func unpackFdKey(prefix string, rawKey string) (db string, shard string, fd int,
 	return
 }
 
-// splitNewIndex creates a new shard index and add to meta
+// splitNewIndex creates a new shard index, add to meta and change the HotShard name
 func (a *Ari) splitNewIndex(ctx context.Context, meta *DbMeta) error  {
 	shardMet := NewShardMeta()
 	index := getEsRawIdx(meta.Name, shardMet.Name)
@@ -458,6 +460,7 @@ func (a *Ari) splitNewIndex(ctx context.Context, meta *DbMeta) error  {
 		return err
 	}
 	meta.Shards[shardMet.Name] = shardMet
+	meta.HotShard = shardMet.Name
 	return nil
 }
 
@@ -483,7 +486,7 @@ func (a *Ari) shardingTask(ctx context.Context) (err error) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(10 * time.Second):
+		case <-time.After(30 * time.Second):
 			// to check per 10 seconds
 		}
 		
@@ -695,13 +698,15 @@ func (a *Ari) AllocateFd(db string, shard string) (uint16, error) {
 	if err != nil {
 		return 0, err
 	}
-	a.logger.Info(fmt.Sprintf("[allocate-fd]:%d\n", rp.Fd))
+	a.logger.Info(fmt.Sprintf("[allocate-fd]db:%s shard:%s fd:%d",
+		db, shard, rp.Fd))
 	return uint16(rp.Fd), nil
 }
 
 // FreeFd frees a hdfs fd of a shard
 // re freeing a fd is ok
 func (a *Ari) FreeFd(db string, shard string, fd uint16) error  {
+	defer a.logger.Info(fmt.Sprintf("[free-fd]:db %s shard %s fd %d\n", db, shard, fd))
 	req := &ari_call.FreeFdReq{Db:db, Shard:shard, Fd:uint32(fd)}
 	rd, err := proto.Marshal(req)
 	if err != nil {
@@ -711,12 +716,12 @@ func (a *Ari) FreeFd(db string, shard string, fd uint16) error  {
 	if err != nil {
 		return err
 	}
+	a.logger.Debug("call master to free fd")
 	if resp.Status != int32(0) {
 		a.logger.Info(fmt.Sprintf("[free-fd] call master status:%d, msg:%s",
 			resp.Status, resp.Msg))
 		return errors.New("free fd fail")
 	}
-	a.logger.Info(fmt.Sprintf("[free-fd]:%d\n", fd))
 	return nil
 }
 
@@ -725,6 +730,7 @@ func (a *Ari) FreeFd(db string, shard string, fd uint16) error  {
 // Ensure registers db with options
 // this method should be called before `Open`
 func (a *Ari) Ensure(db string, cfg *common.Config) error {
+	a.logger.Debug(fmt.Sprintf("ensure db %s", db))
 	var opts DBOptions
 	err := cfg.Unpack(&opts)
 	if err != nil {
@@ -748,7 +754,11 @@ func (a *Ari) Ensure(db string, cfg *common.Config) error {
 		return nil
 	}
 	
-	dbMeta := GetInitialDbMeta(db, opts)
+	// there isn't such db, so we should initialize it right now
+	dbMeta, err := GetInitialDbMeta(db, opts)
+	if err != nil {
+		return err
+	}
 	rawIdx := getEsRawIdx(dbMeta.Name, dbMeta.HotShard)
 	err = EnsureIndex(a.ctx, dbMeta.Name, rawIdx, a.ES.Client)
 	if err != nil {

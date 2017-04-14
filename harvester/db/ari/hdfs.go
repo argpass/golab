@@ -152,24 +152,24 @@ func (h *HdfsAppender) CurrentOff() (uint64, error) {
 // the method is concurrency-safe
 func (h *HdfsAppender) Append(data []byte) (offset uint64, err error) {
 	h.lock.Lock()
+	defer h.lock.Unlock()
 	if h.closed {
 		err = harvesterd.Error{Code:libs.E_APPENDER_CLOSED}
 		return
 	}
 	_, err = h.writer.Write(data)
 	if err != nil {
-		h.lock.Unlock()
 		return
 	}
 	offset = h.cur
 	h.cur += uint64(len(data))
-	h.lock.Unlock()
 	return
 }
 
 // Close the appender and release fd
 func (h *HdfsAppender) Close() error {
 	h.lock.Lock()
+	defer h.lock.Unlock()
 	h.closed = true
 	
 	// only try to free it, never to raise error on the method
@@ -177,10 +177,8 @@ func (h *HdfsAppender) Close() error {
 	
 	err := h.writer.Close()
 	if err != nil {
-		h.lock.Unlock()
 		return err
 	}
-	h.lock.Unlock()
 	return nil
 }
 

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"github.com/pkg/errors"
 	"strings"
+	"runtime"
 )
 
 const (
@@ -354,21 +355,17 @@ func newWaiter(db string, a *Ari, meta DbMeta) *DbWaiter {
 	w := &DbWaiter{
 		db:db,
 		a:a,
+		dbMeta:meta,
 		entriesC:make(chan *libs.Entry),
 	}
-	w.CheckDbMeta(meta)
 	return w
 }
 
 func (w *DbWaiter) CheckDbMeta(meta DbMeta) {
-	//old := w.dbMeta.HotShard
+	w.logger.Debug(fmt.Sprintf("db meta change to:%+v, current:%+v", meta, w.dbMeta))
 	w.lock.Lock()
 	w.dbMeta = meta
 	w.lock.Unlock()
-	// hot shard changed, notify
-	//if w.dbMeta.HotShard != old {
-	//
-	//}
 }
 
 func (w *DbWaiter) running() error {
@@ -445,13 +442,26 @@ func (w *DbWaiter) handleBatch(ctx context.Context,
 		return nil
 	}
 	
-	writer, err := w.GetWriter()
-	if err != nil {
-		return errors.Wrap(err, "get writer")
-	}
-	err = writer.Write(ctx, batch)
-	if err != nil {
-		return errors.Wrap(err, "batch writer write")
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		writer, err := w.GetWriter()
+		if err != nil {
+			return errors.Wrap(err, "get writer")
+		}
+		err = writer.Write(ctx, batch)
+		if err != nil {
+			if err == writerClosedErr {
+				runtime.Gosched()
+				continue
+			}
+			return errors.Wrap(err, "on batch writer writing")
+		}
+		// write successfully
+		return nil
 	}
 	return nil
 }
@@ -553,12 +563,12 @@ func (w *DbWaiter) GetWriter() (*writer, error) {
 		if err != nil {
 			return nil, err
 		}
+		w.logger.Debug("writer has been created")
 		w.writer = wt
 		
 	} else {
 		// if hot shard changed, replace the writer with a new one
 		if w.writer.shard != w.dbMeta.HotShard {
-			
 			// create a new one
 			wt, err := w.createBatchWriter()
 			if err != nil {
@@ -566,11 +576,13 @@ func (w *DbWaiter) GetWriter() (*writer, error) {
 			}
 			
 			// close the old one
-			err = w.writer.Close()
+			old := w.writer
+			w.writer = wt
+			w.logger.Debug("writer has been reseted to newest hot shard")
+			err = old.Close()
 			if err != nil {
 				return nil, err
 			}
-			w.writer = wt
 		}
 	}
 	return w.writer, nil
@@ -580,6 +592,7 @@ func (w *DbWaiter) GetWriter() (*writer, error) {
 type writer struct {
 	lock    sync.RWMutex
 	db      string
+	closed  bool
 	
 	// shard is current hot shard of `db`
 	shard   string
@@ -606,6 +619,10 @@ func newBatchWriter(
 func (b *writer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if b.closed  {
+		return nil
+	}
+	b.closed = true
 	err := b.hdfsAppender.Close()
 	if err != nil {
 		return err
@@ -618,8 +635,17 @@ func (b *writer) getEsBulker() *ESBulker  {
 	return NewEsBulker(b.es, index)
 }
 
+var writerClosedErr = errors.New("batch writer closed")
+
 // Write batch to db
 func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
+	b.lock.Lock()
+	if b.closed {
+		b.lock.Unlock()
+		return writerClosedErr
+	}
+	b.lock.Unlock()
+	
 	if len(batch) == 0 {
 		return nil
 	}
@@ -644,12 +670,15 @@ func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
 	
 	// lock to write
 	b.lock.Lock()
+	defer b.lock.Unlock()
+	if b.closed {
+		return writerClosedErr
+	}
 	_, err = b.hdfsAppender.Append(chunk.Bytes())
 	if err != nil {
 		return err
 	}
 	err = bulker.Do(ctx)
-	b.lock.Unlock()
 	return err
 }
 

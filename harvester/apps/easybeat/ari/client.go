@@ -24,6 +24,7 @@ func newClient(tc *transport.Client) *client {
 	}
 }
 
+// Close the client
 func (c *client) Close() error {
 	//return c.Client.Close()
 	return nil
@@ -42,7 +43,8 @@ func (c *client) PublishEvent(data outputs.Data) error {
 func (c *client) PublishEvents(data []outputs.Data) (nextEvents []outputs.Data, err error) {
 	defer func(){
 		// todo-remove: debug info by logger instead of `fmt`
-		fmt.Printf("pub evts with err:%+v, data count:%d\n", err, len(data))
+		fmt.Printf("pub evts with err:%+v, data count:%d\n",
+			err, len(data))
 	}()
 	
 	buf, err := serializeEvents(data)

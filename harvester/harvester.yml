@@ -37,12 +37,12 @@ db.engine.ari:
 
 #------------------------------ databases  -----------------------------#
 db.databases:
-- name: "db_8"
+- name: "db1"
   engine: "ari"
   engine_options:
     shard_policy:
       maximum_idx_size: 20
-      maximum_duration: "2d12h"
+      maximum_duration: "1d1"
 
 - name: "db_3"
   engine: "ari"
@@ -54,7 +54,7 @@ db.databases:
 #============================== harvesterd ==============================#
 harvesterd.type_routing:
   live_eventer:
-    save_to_db: "db_8"
+    save_to_db: "db1"
   live_gw:
     save_to_db: "db_live_gateway"
 

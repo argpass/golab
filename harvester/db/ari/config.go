@@ -28,7 +28,7 @@ func parseDuration(data string) (du time.Duration, err error) {
 		d, ok := durationUnits[unit]
 		du += d * time.Duration(i)
 		if !ok {
-			err = errors.New(fmt.Sprintf("no such unit %s", string(unit)))
+			err = errors.New(fmt.Sprintf("no such unit %s, data:%s", string(unit), data))
 			return
 		}
 	}
@@ -74,6 +74,15 @@ func (s ShardPolicy) ParsePolicy() (Policy, error) {
 
 type DBOptions struct {
 	ShardPolicy ShardPolicy         `config:"shard_policy" json:"shard_policy"`
+}
+
+// Validate the db options
+func (p *DBOptions) Validate() error {
+	_, err := p.ShardPolicy.ParsePolicy()
+	if err != nil {
+		return errors.Wrap(err, "validate options")
+	}
+	return nil
 }
 
 type HDFSConfig struct {
