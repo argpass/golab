@@ -1,0 +1,62 @@
+######################## Harvester Configuration ########################
+
+#============================== Harvester  ==============================#
+cluster:
+  etcd_addrs:
+      - "localhost:2379"
+  node_addr: ":8765"
+  cluster_name: "myh1"
+
+#============================== shippers  ==============================#
+#------------------------------ fb shipper -----------------------------#
+# fb shipper config.
+# we can start various fb shippers to receive various filebeats' beats
+shipper.fb:
+# shipper name
+- name: "fb_eventer"
+  # tcp address
+  addr: ":9736"
+  # override doc_type if you need to do that
+  #override_doc_type: ~
+
+shipper.mock:
+- name: "mock shipper"
+
+#============================== db        ==============================#
+#------------------------------ engines   ------------------------------#
+db.engine.ari:
+  hdfs:
+    addr: "localhost:9000"
+  es:
+    addrs:
+        - "http://localhost:9200"
+  #db options is engine global options, can be overrided
+  #db_options:
+  #  shard_policy:
+  #    maximum_idx_size: 20
+  #    maximum_docs: 800000000
+  #    maximum_duration: "2d12h"
+
+#------------------------------ databases  -----------------------------#
+db.databases:
+- name: "db_8"
+  engine: "ari"
+  engine_options:
+    shard_policy:
+      maximum_idx_size: 20
+      maximum_duration: "2d12h"
+
+- name: "db_3"
+  engine: "ari"
+  engine_options:
+    shard_policy:
+      maximum_idx_size: 20
+      maximum_duration: "2d12h"
+
+#============================== harvesterd ==============================#
+harvesterd.type_routing:
+  live_eventer:
+    save_to_db: "db_8"
+  live_gw:
+    save_to_db: "db_live_gateway"
+

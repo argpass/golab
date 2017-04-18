@@ -1,0 +1,27 @@
+syntax = "proto3";
+package v1;
+
+message Field {
+    enum FieldTypes {
+        IsInt = 0;
+        IsString = 1;
+    }
+    FieldTypes Type = 1;
+    string key = 2;
+    int64 Ival = 3;
+    string Sval = 4;
+    double Fval = 5;
+}
+
+message LogRow {
+    string LogType = 1;
+    int64 Timestamp = 2;
+    repeated Field Fields = 3;
+    repeated string Tag = 4;
+    string Body = 5;
+    string HostName = 6;
+}
+
+message Bulk {
+    repeated LogRow Rows = 1;
+}
