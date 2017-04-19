@@ -48,6 +48,7 @@ func (m *mockShipper) ShipOn(
 		(*zap.Logger).With(zap.String("mod", "mock shipper"))
 	
 	go func() {
+		time.Sleep(8 * time.Second)
 		logger.Debug(fmt.Sprintf("start with config:%+v", *m.cfg))
 		defer logger.Info("bye")
 		

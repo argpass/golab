@@ -73,20 +73,20 @@
 		{
 			"checksumSHA1": "G4sDLhNUBOp9hc/BymHug5W3WMw=",
 			"path": "github.com/dbjtech/golab/harvester",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "1X1cEc3W4MRJLFZVxZ/GDz68kMU=",
 			"path": "github.com/dbjtech/golab/harvester/apps/easybeat",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "KkplUoo4OeXrGBRsvSyyDmOz+u8=",
 			"path": "github.com/dbjtech/golab/harvester/apps/easybeat/ari",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "lQZN58HlMH6P2pvc8b41EXWdapw=",
@@ -103,74 +103,74 @@
 		{
 			"checksumSHA1": "zArxju65r2LKOJr/3GSSsIn5XUU=",
 			"path": "github.com/dbjtech/golab/harvester/db",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "iY2RqD6kSeN4owpviLxQFAgllSs=",
 			"path": "github.com/dbjtech/golab/harvester/db/ari",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "9k8eQFgeOFSr3RyR1gj9nLGPezI=",
 			"path": "github.com/dbjtech/golab/harvester/db/ari/pb",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "OZP8va5PcsDEXVz5YRogP74zHs4=",
 			"path": "github.com/dbjtech/golab/harvester/harvesterd",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "nLj0vNFb5E0XfVZn40i7zid/BAk=",
 			"path": "github.com/dbjtech/golab/harvester/libs",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "2ObcB3z01XBmYPJbhTo9EKqihQc=",
 			"path": "github.com/dbjtech/golab/harvester/libs/cluster",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "KiCkFXE0yrElFVB+9GqEcg9QFfI=",
 			"path": "github.com/dbjtech/golab/harvester/libs/cluster/pb",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "czeRGsOmE33XdjZwmXSjmHsVEqI=",
 			"path": "github.com/dbjtech/golab/harvester/libs/constant",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "AuBRJgxLF/QAZJIw5T6hUx4My6g=",
 			"path": "github.com/dbjtech/golab/harvester/shipper",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "zOYZKAkph1g/5h0PTwFyd+R9EeY=",
 			"path": "github.com/dbjtech/golab/harvester/shipper/fb",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "1ZHrFCSOLMK0NhlFCZMYcZcYj4E=",
 			"path": "github.com/dbjtech/golab/harvester/shipper/fb/protocol/v1",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
-			"checksumSHA1": "165EGIQs7irT6487NKbAaOD9Aak=",
+			"checksumSHA1": "e+BK8XHi6PHmKyiRrTgo2jn+tB8=",
 			"path": "github.com/dbjtech/golab/harvester/shipper/mock",
-			"revision": "f89ba9786d97fad534d3c4c8eab2645f3e654864",
-			"revisionTime": "2017-04-19T06:40:19Z"
+			"revision": "007eb2c26478ec12f3fd4ee2d0539c7d1f6d6105",
+			"revisionTime": "2017-04-19T08:44:37Z"
 		},
 		{
 			"checksumSHA1": "dLuGlVkuGcAsclqNZxdtbZS4L1o=",
