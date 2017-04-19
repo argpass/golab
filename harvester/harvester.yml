@@ -18,7 +18,10 @@ shipper.fb:
   #override_doc_type: ~
 
 #shipper.mock:
-#- name: "mock shipper"
+#  mock_file: "mock.log"
+#  batch_num: 800000
+#  max_row_count: 200000
+#  dump_file: "mock.dat"
 
 #============================== db        ==============================#
 #------------------------------ engines   ------------------------------#
