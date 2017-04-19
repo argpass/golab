@@ -154,8 +154,8 @@ func NewNode(cluster string, listenAddr string, etcd3 *clientv3.Client) (*Node) 
 		Etcd3:       &Etcd3{Client:etcd3},
 		nodeId:      listenAddr,
 		masterTasks: make(map[string]IsMasterTask),
-		// heartbeat 10s
-		heartbeat:10,
+		// heartbeat 20s
+		heartbeat: 20,
 		allocC:make(chan *allocReq, 1024),
 		msCaller:newMasterCaller(),
 		callHandles: make(map[string]func(*pb.Req)*pb.Resp),
@@ -225,7 +225,7 @@ func (n *Node) touchMasterLockOnce() error {
 		Else(clientv3.OpPut(key_lock, n.nodeId, clientv3.WithLease(n.LeaseId))).
 		Commit()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "race master lock")
 	}
 	if !r.Succeeded {
 		// lock hasn't been created yet, so i create it
@@ -337,6 +337,7 @@ func (n *Node) running() error {
 	// start keeping lease alive
 	n.wg.Go(func() error {
 		_, err := n.Etcd3.KeepAlive(n.ctx, n.LeaseId)
+		n.logger.Info(fmt.Sprintf("lease keepping bye with err:%v", err))
 		return err
 	})
 	
