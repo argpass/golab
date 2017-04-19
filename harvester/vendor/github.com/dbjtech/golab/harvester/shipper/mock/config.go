@@ -44,7 +44,7 @@ func NewStatusAware(dumpFile string) (*StatusAware, error) {
 		return nil, err
 	}
 	
-	s := &StatusAware{}
+	s := &StatusAware{status: &Status{}, dumpFile:dumpFile,}
 	if exists {
 		data, err := ioutil.ReadFile(dumpFile)
 		if err != nil {

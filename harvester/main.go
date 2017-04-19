@@ -23,6 +23,10 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	maxWaitSeconds = 10
+)
+
 var (
 	
 	confile = flag.String(
@@ -240,9 +244,17 @@ func (p *program) stop(err error, sigs []os.Signal)  {
 		p.err = err
 		// cancel root context
 		p.wg.Cancel(err)
-		// todo: maybe i should kill the program when wait timeout
 		// wait all goroutines to exit
 		p.logger.Info("waitting for all goroutines to exit")
+		
+		// kill the program when wait timeout
+		go func(){
+			select {
+			case <-time.After(maxWaitSeconds * time.Second):
+				p.logger.Info("wait timeout, kill self now")
+				os.Exit(99)
+			}
+		}()
 		p.wg.Wait()
 		p.logger.Debug("root context stop done")
 	})
