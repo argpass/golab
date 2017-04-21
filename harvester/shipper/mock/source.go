@@ -80,8 +80,8 @@ func (m *LogMocker) RandomEntry() (et *libs.Entry) {
 		Fields:map[string]libs.Value{},
 	}
 	et.AddStringTag("mock")
-	// attatch 4 fields and 4 random tags
-	for i:=0; i < 3; i++ {
+	// attatch fields and random tags
+	for i:=0; i < 2; i++ {
 		et.AddStringTag(m.randomTag())
 		k, v := m.randomTerm()
 		et.AddStringField(k, v)
@@ -98,17 +98,18 @@ func readRows(filepath string, maxRowsCnt int) ([]string, error) {
 	}
 	var rows []string
 	var rowBuf []byte
+	var last byte
 	for _, c := range data {
 		if len(rows) >= maxRowsCnt {
 			break
 		}
-		if c == '[' && rowBuf != nil {
+		if last == '\n' && c == '[' && rowBuf != nil {
 			// wrap pre row
 			rows = append(rows, string(rowBuf))
 			rowBuf = nil
-		}else{
-			rowBuf = append(rowBuf, c)
 		}
+		rowBuf = append(rowBuf, c)
+		last = c
 	}
 	if rowBuf != nil && maxRowsCnt > len(rows) {
 		rows = append(rows, string(rowBuf))

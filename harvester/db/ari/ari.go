@@ -115,6 +115,7 @@ func New(name string, cfg *common.Config) (*Ari, error)  {
 }
 
 func (a *Ari) cleanMeta() error {
+	a.logger.Info("=======> clean meta <=========")
 	key := a.getMetaKey()
 	_, err := a.Node.Etcd3.Delete(a.ctx, key)
 	if err != nil {
@@ -284,6 +285,9 @@ func (a *Ari) Start(ctx context.Context) error {
 	a.ctx = context.WithValue(a.wg.Context(), constant.KEY_P_WG, a.wg)
 	
 	a.logger.Debug("start...")
+	
+	//// todo-remove
+	//return a.cleanMeta()
 	
 	// keep viewing db meta
 	clusterName := a.Node.ClusterName.String()
@@ -806,10 +810,12 @@ func (a *Ari) Open(db string) (db.IsDBCon, error) {
 	// if waiter doesn't exist, create it
 	if !exists {
 		wt = newWaiter(db, a, *m)
+		waitersNum.Add(1)
 		err := wt.Start(a.ctx)
 		if err != nil {
 			return nil, err
 		}
+		a.logger.Debug(fmt.Sprintf("new waiter for db %s", db))
 		
 		a.GetMeta()
 		a.lock.Lock()

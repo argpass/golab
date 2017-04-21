@@ -21,6 +21,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"time"
 	"github.com/pkg/errors"
+	_ "net/http/pprof"
 )
 
 const (
@@ -256,7 +257,7 @@ func (p *program) stop(err error, sigs []os.Signal)  {
 			}
 		}()
 		p.wg.Wait()
-		p.logger.Debug("root context stop done")
+		p.logger.Debug("root context stopped")
 	})
 }
 

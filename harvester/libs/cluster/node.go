@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"net"
 	context2 "golang.org/x/net/context"
+	"time"
 )
 
 // ClusterName
@@ -434,13 +435,18 @@ func (n *Node) CallMaster(
 	ctx context.Context,
 	namespace string, key string, reqBuf []byte) (*pb.Resp, error) {
 	
-	c := n.msCaller.GetClient()
-	if c == nil {
-		return nil, errors.New("invalid rpc client")
+	for {
+		c := n.msCaller.GetClient()
+		if c == nil {
+			n.logger.Debug("rpc client isn't ready, wait 1 second and try again")
+			time.Sleep(1 * time.Second)
+			continue
+			//return nil, errors.New("rpc client isn't ready")
+		}
+		req := &pb.Req{Namespace:namespace,Key:key,ReqBuf:reqBuf, Node:&n.nodeInfo}
+		n.logger.Debug(fmt.Sprintf("rpc send call req :%v", *req))
+		return c.Call(ctx, req)
 	}
-	req := &pb.Req{Namespace:namespace,Key:key,ReqBuf:reqBuf, Node:&n.nodeInfo}
-	n.logger.Debug(fmt.Sprintf("rpc send call req :%v", *req))
-	return c.Call(ctx, req)
 }
 
 // Call implement rpc server.
@@ -496,6 +502,7 @@ func (c *masterCaller) Invalid()  {
 }
 
 func (c *masterCaller) GetClient() (pb.CallMasterClient) {
+	// fixme: wait client to have been created
 	return c.client
 }
 

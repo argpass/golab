@@ -421,6 +421,7 @@ func (w *DbWaiter) Start(ctx context.Context) error {
 // NewConnection allocate a db connection
 // todo: to reuse idle connections instead of creating a new one
 func (w *DbWaiter) NewConnection() (*NativeConnection) {
+	w.logger.Debug("new connection")
 	conId := uint64(time.Now().UnixNano())
 	
 	con := newNativeConnection(
@@ -435,7 +436,7 @@ func (w *DbWaiter) NewConnection() (*NativeConnection) {
 	return con
 }
 
-func (w *DbWaiter) handleBatch(ctx context.Context,
+func (w *DbWaiter) handlingBatch(ctx context.Context,
 	batch []*libs.Entry) error  {
 	
 	if len(batch) == 0 {
@@ -456,6 +457,7 @@ func (w *DbWaiter) handleBatch(ctx context.Context,
 		if err != nil {
 			if err == writerClosedErr {
 				runtime.Gosched()
+				w.logger.Debug("batch writer closed, continue to get next writer to write the batch")
 				continue
 			}
 			return errors.Wrap(err, "on batch writer writing")
@@ -470,10 +472,12 @@ func (w *DbWaiter) handleBatch(ctx context.Context,
 func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) error {
 	var entry *libs.Entry
 	var needWrap bool
-	// todo: should with timeout ?
-	// todo: limit maximum handle batch goroutines ?
+	// fixme: should with timeout to handle a batch ?
+	// todo: configure the args
 	ctx := w.ctx
+	workerNum := 30
 	batchMaximum := 3000
+	// max size: 1mb
 	batchSizeMaximum := 1 * 1024 * 1024
 	batchTimeDelayMaximum := 10 * time.Second
 	buf := make([]*libs.Entry, 0, batchMaximum)
@@ -482,6 +486,31 @@ func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) error {
 	defer func() {
 		w.logger.Info("pumpingBatch exit")
 	}()
+	
+	batchC := make(chan []*libs.Entry)
+	// start new goroutines to handle the batchs
+	for i:=0; i < workerNum; i++ {
+		w.wg.Go(func() error {
+			for {
+				select {
+				case <-w.ctx.Done():
+					return w.ctx.Err()
+				case batch := <-batchC:
+					t_start := time.Now().Unix()
+					err := w.handlingBatch(ctx, batch)
+					t_end := time.Now().Unix()
+					cost := t_end - t_start
+					if t_end - t_start > 2 {
+						w.logger.Debug(fmt.Sprintf("handle batch cost %d, more than 2 seconds", cost))
+					}
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		})
+	}
 
 	for {
 		if needWrap && len(buf) > 0 {
@@ -489,14 +518,21 @@ func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) error {
 			batch := make([]*libs.Entry, len(buf))
 			copy(batch, buf[0:])
 
-			// start new goroutine to handle the batch
-			w.wg.Go(func() error {
-				return  w.handleBatch(ctx, batch)
-			})
-			// reset buf
-			buf = buf[:0]
-			needWrap = false
-			size = 0
+			send:
+			select {
+			case <-w.ctx.Done():
+				return w.ctx.Err()
+			case batchC <-batch:
+				// reset buf
+				buf = buf[:0]
+				needWrap = false
+				size = 0
+			case <-time.After(2 * time.Second):
+				// todo: config the timeout arg
+				w.logger.Debug(
+					"there's a batch waitting to be handled, timeout 2 seconds")
+				goto send
+			}
 		}
 
 		select {
@@ -639,6 +675,7 @@ var writerClosedErr = errors.New("batch writer closed")
 
 // Write batch to db
 func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
+	//logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
 	b.lock.Lock()
 	if b.closed {
 		b.lock.Unlock()
@@ -666,6 +703,7 @@ func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
 		et.Body = rk.EncodeBase64()
 		bulker.Add(DumpEntry(et))
 	}
+	
 	chunk := ckBuilder.Build()
 	
 	// lock to write
@@ -674,10 +712,12 @@ func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
 	if b.closed {
 		return writerClosedErr
 	}
-	_, err = b.hdfsAppender.Append(chunk.Bytes())
+	data := chunk.Bytes()
+	_, err = b.hdfsAppender.Append(data)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "append chunk")
 	}
+	
 	err = bulker.Do(ctx)
 	return err
 }

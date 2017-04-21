@@ -17,11 +17,11 @@ shipper.fb:
   # override doc_type if you need to do that
   #override_doc_type: ~
 
-#shipper.mock:
-#  mock_file: "mock.log"
-#  batch_num: 800000
-#  max_row_count: 200000
-#  dump_file: "mock.dat"
+shipper.mock:
+  mock_file: ".local/evt.log"
+  batch_num: 800000
+  max_row_count: 200000
+  dump_file: ".local/mock.dat"
 
 #============================== db        ==============================#
 #------------------------------ engines   ------------------------------#
@@ -45,9 +45,9 @@ db.databases:
   engine_options:
     shard_policy:
       maximum_idx_size: 20
-      maximum_duration: "1d1"
+      maximum_duration: "1d1h"
 
-- name: "db_3"
+- name: "dbmock"
   engine: "ari"
   engine_options:
     shard_policy:
@@ -56,8 +56,8 @@ db.databases:
 
 #============================== harvesterd ==============================#
 harvesterd.type_routing:
-  live_eventer:
-    save_to_db: "db1"
+  mock:
+    save_to_db: "dbmock"
   live_gw:
     save_to_db: "db_live_gateway"
 
