@@ -3,9 +3,9 @@ package db
 import (
 	"github.com/elastic/beats/libbeat/common"
 	"context"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"go.uber.org/zap"
-	"github.com/dbjtech/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/libs/constant"
 	"fmt"
 	"sync"
 	"github.com/pkg/errors"

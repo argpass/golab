@@ -3,7 +3,7 @@ package cluster
 import (
 	"context"
 	"github.com/coreos/etcd/clientv3"
-	"github.com/dbjtech/golab/pending/utils"
+	"github.com/argpass/golab/pending/utils"
 	"sync/atomic"
 	"sync"
 	"github.com/coreos/etcd/mvcc/mvccpb"

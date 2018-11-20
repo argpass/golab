@@ -2,7 +2,7 @@ package ari
 
 import (
 	"testing"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"time"
 )
 

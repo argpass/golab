@@ -6,7 +6,7 @@ import (
 	"github.com/elastic/beats/libbeat/outputs"
 	"github.com/elastic/beats/libbeat/outputs/mode"
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/dbjtech/golab/harvester/shipper/fb/protocol/v1"
+	"github.com/argpass/golab/harvester/shipper/fb/protocol/v1"
 	"github.com/golang/protobuf/proto"
 	"fmt"
 	"github.com/pkg/errors"

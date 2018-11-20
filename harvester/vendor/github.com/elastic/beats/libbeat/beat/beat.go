@@ -130,7 +130,7 @@ func init() {
 
 // Run initializes and runs a Beater implementation. name is the name of the
 // Beat (e.g. packetbeat or metricbeat). version is version number of the Beater
-// implementation. bt is the `Creator` callback for creating a new beater
+// implementation. bt is the `Creator` callback for creating a new realtime
 // instance.
 func Run(name, version string, bt Creator) error {
 	return handleError(newBeat(name, version).launch(bt))

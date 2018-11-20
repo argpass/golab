@@ -1,6 +1,6 @@
 package db
 
-import "github.com/dbjtech/golab/harvester/libs"
+import "github.com/argpass/golab/harvester/libs"
 
 type IsDBCon interface {
 	// Save

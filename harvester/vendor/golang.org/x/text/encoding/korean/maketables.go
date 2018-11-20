@@ -4,7 +4,7 @@
 
 // +build ignore
 
-package main
+package korean
 
 // This program generates tables.go:
 //	go run maketables.go | gofmt > tables.go

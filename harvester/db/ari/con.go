@@ -1,16 +1,16 @@
 package ari
 
 import (
-	"github.com/dbjtech/golab/harvester/harvesterd"
+	"github.com/argpass/golab/harvester/harvesterd"
 	"context"
 	"sync/atomic"
-	"github.com/dbjtech/golab/pending/utils"
+	"github.com/argpass/golab/pending/utils"
 	"time"
-	"github.com/dbjtech/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/libs/constant"
 	"go.uber.org/zap"
-	"github.com/dbjtech/golab/harvester/db"
+	"github.com/argpass/golab/harvester/db"
 	"fmt"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"math"
 	"github.com/olivere/elastic"
 	"sync"
@@ -437,7 +437,7 @@ func (w *DbWaiter) NewConnection() (*NativeConnection) {
 }
 
 func (w *DbWaiter) handlingBatch(ctx context.Context,
-	batch []*libs.Entry) error  {
+	batch []*libs.Entry, stat map[string] interface{}) error  {
 	
 	if len(batch) == 0 {
 		return nil
@@ -453,7 +453,9 @@ func (w *DbWaiter) handlingBatch(ctx context.Context,
 		if err != nil {
 			return errors.Wrap(err, "get writer")
 		}
-		err = writer.Write(ctx, batch)
+		t := time.Now()
+		err = writer.Write(ctx, batch, stat)
+		stat["writer_write"] = time.Since(t)
 		if err != nil {
 			if err == writerClosedErr {
 				runtime.Gosched()
@@ -497,11 +499,12 @@ func (w *DbWaiter) pumpingBatch(ch <-chan *libs.Entry) error {
 					return w.ctx.Err()
 				case batch := <-batchC:
 					t_start := time.Now().Unix()
-					err := w.handlingBatch(ctx, batch)
+					var stat = map[string] interface{}{}
+					err := w.handlingBatch(ctx, batch, stat)
 					t_end := time.Now().Unix()
 					cost := t_end - t_start
 					if t_end - t_start > 2 {
-						w.logger.Debug(fmt.Sprintf("handle batch cost %d, more than 2 seconds", cost))
+						w.logger.Debug(fmt.Sprintf("handle batch cost %d, stat:%v", cost, stat))
 					}
 					if err != nil {
 						return err
@@ -674,51 +677,59 @@ func (b *writer) getEsBulker() *ESBulker  {
 var writerClosedErr = errors.New("batch writer closed")
 
 // Write batch to db
-func (b *writer) Write(ctx context.Context, batch []*libs.Entry) error {
+func (b *writer) Write(ctx context.Context, batch []*libs.Entry, stat map[string] interface{}) error {
 	//logger := ctx.Value(constant.KEY_LOGGER).(*zap.Logger)
-	b.lock.Lock()
-	if b.closed {
-		b.lock.Unlock()
-		return writerClosedErr
-	}
-	b.lock.Unlock()
-	
 	if len(batch) == 0 {
 		return nil
 	}
 	
-	off, err := b.hdfsAppender.CurrentOff()
-	if err != nil {
-		return err
-	}
-	fd := b.hdfsAppender.GetFD()
-	bulker := b.getEsBulker()
-	ckBuilder := NewChunkBuilder()
-	for i, et := range batch {
-		if i >= math.MaxUint16 {
-			return errors.New("the batch size is too large")
-		}
-		ckBuilder.AddRow([]byte(et.Body))
-		rk := MakeRowKey(fd, off, uint16(i))
-		et.Body = rk.EncodeBase64()
-		bulker.Add(DumpEntry(et))
-	}
-	
-	chunk := ckBuilder.Build()
-	
-	// lock to write
-	b.lock.Lock()
-	defer b.lock.Unlock()
 	if b.closed {
 		return writerClosedErr
 	}
+	
+	b.lock.Lock()
+	off, err := b.hdfsAppender.CurrentOff()
+	if err != nil {
+		b.lock.Unlock()
+		return err
+	}
+	fd := b.hdfsAppender.GetFD()
+	ckBuilder := NewChunkBuilder()
+	if len(batch) >= math.MaxUint16 {
+		b.lock.Unlock()
+		return errors.New("the batch size is too large")
+	}
+	esDocs := make([][]byte, len(batch))
+	for i, et := range batch {
+		ckBuilder.AddRow([]byte(et.Body))
+		rk := MakeRowKey(fd, off, uint16(i))
+		et.Body = rk.EncodeBase64()
+		esDocs[i] = DumpEntry(et)
+	}
+	
+	t := time.Now()
+	chunk := ckBuilder.Build()
+	stat["chunk_build"] = time.Since(t)
 	data := chunk.Bytes()
+	t = time.Now()
 	_, err = b.hdfsAppender.Append(data)
+	b.lock.Unlock()
+	
+	stat["hdfs_append"] = time.Since(t)
 	if err != nil {
 		return errors.Wrap(err, "append chunk")
 	}
 	
-	err = bulker.Do(ctx)
+	err = b.saveToEs(esDocs)
+	if err != nil {
+		return err
+	}
+	// todo: give entries back to the Entry Pool
 	return err
+}
+
+func (b *writer) saveToEs(esDocs [][]byte) error {
+	// todo: save to es
+	return nil
 }
 

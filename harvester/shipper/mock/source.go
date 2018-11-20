@@ -3,7 +3,7 @@ package mock
 import (
 	"github.com/pkg/errors"
 	"io/ioutil"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"math/rand"
 	"fmt"
 	"math"
@@ -38,7 +38,7 @@ func NewLogMocker(filepath string, maxRowCount int) (*LogMocker, error) {
 		return nil, errors.New("empty rows")
 	}
 	mocker := &LogMocker{
-		rows:rows, snRandLen: 5, tagRandLen:4,
+		rows:rows, snRandLen: 5, tagRandLen: 4,
 		tags:make(map[string]struct{}),
 		terms:make(map[string]struct{}),
 		sns:make(map[string]struct{}),
@@ -60,7 +60,7 @@ func (m *LogMocker) randomTag() (string)  {
 
 func (m *LogMocker) randomTerm() (string, string)  {
 	v := fmt.Sprintf("v_%s", randomNumString(m.tagRandLen))
-	k := fmt.Sprintf("k_%s", randomNumString(3))
+	k := fmt.Sprintf("k_%s", randomNumString(2))
 	m.terms[k] = struct{}{}
 	return k, v
 }

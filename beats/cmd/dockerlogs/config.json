@@ -1,0 +1,51 @@
+{
+  "output": {
+    "masses": {
+      "alpha_evt": {
+        "type": "eventer",
+        "host": "mass_server",
+        "db": {
+          "name": "alpha_evt",
+          "db_size_maximum": "100GB",
+          "shard_size_maximum": "2GB"
+        }
+      }
+    },
+    "localRotates": {
+      "alpha_evt": {"type": "eventer", "backups": 10, "size_maximum": "50000000"}
+    }
+  },
+
+  "sources": {
+    "uweb": {
+      "output": [
+        {
+          "mass": {
+            "host": "mass_server",
+            "db": {
+              "name": "alpha_uweb",
+              "db_size_maximum": "100GB",
+              "shard_size_maximum": "2GB"
+            }
+          }
+        },
+        {"rotate": {"backups": 10, "size_maximum": "50MB"}}
+      ]
+    },
+    "eventer": {
+      "output": [
+        {
+          "mass": {
+            "host": "mass_server",
+            "db": {
+              "name": "alpha_evt",
+              "db_size_maximum": "100GB",
+              "shard_size_maximum": "2GB"
+            }
+          }
+        },
+        {"rotate": {"backups": 10, "size_maximum": "50MB"}}
+      ]
+    }
+  }
+}

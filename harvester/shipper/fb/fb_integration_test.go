@@ -2,15 +2,15 @@ package fb
 
 import (
 	"testing"
-	"github.com/dbjtech/golab/harvester/shipper"
+	"github.com/argpass/golab/harvester/shipper"
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/dbjtech/golab/harvester/harvesterd"
+	"github.com/argpass/golab/harvester/harvesterd"
 	"context"
 	"net"
-	"github.com/dbjtech/golab/harvester/shipper/fb/protocol/v1"
-	"github.com/dbjtech/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/shipper/fb/protocol/v1"
+	"github.com/argpass/golab/harvester/libs/constant"
 	"go.uber.org/zap"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 )
 
 func mock_beat_client(addr string, ctx context.Context, msgC <-chan v1.Message) error {

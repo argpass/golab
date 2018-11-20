@@ -7,9 +7,9 @@ import (
 	"context"
 	"time"
 	"go.uber.org/zap"
-	"github.com/dbjtech/golab/harvester/libs/constant"
-	"github.com/dbjtech/golab/harvester/shipper/fb/protocol/v1"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/shipper/fb/protocol/v1"
+	"github.com/argpass/golab/harvester/libs"
 )
 
 type TCPHandler interface {

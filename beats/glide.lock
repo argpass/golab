@@ -1,0 +1,26 @@
+hash: 4f8103e4a818d7f2814ac30894e1f4d45d5a2432e77b1de12b063bae04ada451
+updated: 2018-01-08T20:49:18.024561038+08:00
+imports:
+- name: github.com/docker/docker
+  version: 16a1736b9b93e44c898f95d670bbaf20a558103d
+  subpackages:
+  - client
+- name: github.com/docker/go-units
+  version: d59758554a3d3911fa25c0269de1ebe2f1912c39
+- name: github.com/pkg/errors
+  version: c605e284fe17294bda444b34710735b29d1a9d90
+- name: github.com/samalba/dockerclient
+  version: a3036261847103270e9f732509f43b5f98710ace
+- name: go.uber.org/atomic
+  version: 8474b86a5a6f79c443ce4b2992817ff32cf208b8
+- name: go.uber.org/multierr
+  version: 3c4937480c32f4c13a875a1829af76c98ca3d40a
+- name: go.uber.org/zap
+  version: f85c78b1dd998214c5f2138155b320a4a43fbe36
+  subpackages:
+  - buffer
+  - internal/bufferpool
+  - internal/color
+  - internal/exit
+  - zapcore
+testImports: []

@@ -1,0 +1,24 @@
+hash: ccca53a83b630a5c078db09494da216eafcac97abdafe752b8dd260e2bc68756
+updated: 2018-01-25T16:32:40.592680322+08:00
+imports:
+- name: github.com/gansidui/geohash
+  version: ebe5ba447f344b681c3bd96d2ca3e1ef5b43b7a8
+- name: github.com/pkg/errors
+  version: c605e284fe17294bda444b34710735b29d1a9d90
+- name: github.com/syndtr/goleveldb
+  version: 34011bf325bce385408353a30b101fe5e923eb6e
+  subpackages:
+  - leveldb
+- name: go.uber.org/atomic
+  version: 8474b86a5a6f79c443ce4b2992817ff32cf208b8
+- name: go.uber.org/multierr
+  version: 3c4937480c32f4c13a875a1829af76c98ca3d40a
+- name: go.uber.org/zap
+  version: f85c78b1dd998214c5f2138155b320a4a43fbe36
+  subpackages:
+  - buffer
+  - internal/bufferpool
+  - internal/color
+  - internal/exit
+  - zapcore
+testImports: []

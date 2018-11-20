@@ -1,13 +1,13 @@
 package mock
 
 import (
-	"github.com/dbjtech/golab/harvester/shipper"
+	"github.com/argpass/golab/harvester/shipper"
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"context"
 	"time"
 	"fmt"
-	"github.com/dbjtech/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/libs/constant"
 	"go.uber.org/zap"
 	"math/rand"
 	"github.com/pkg/errors"

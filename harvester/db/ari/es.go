@@ -7,20 +7,35 @@ import (
 	"github.com/pkg/errors"
 	"bytes"
 	"text/template"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"strings"
 	"fmt"
 	"net/http"
 	"io/ioutil"
+	"github.com/argpass/golab/harvester/libs/constant"
+	"github.com/argpass/golab/pending/utils"
+	"go.uber.org/zap"
+	"time"
 )
+
+type ESDoc struct {
+	Data string
+	Index string
+}
 
 type ESPort struct {
 	*elastic.Client
 	Addrs []string
+	docsC chan []ESDoc
+	docC chan ESDoc
+	wg utils.IsGroup
+	
+	logger *zap.Logger
 }
 
 func NewESPort(addrs ...string) (*ESPort, error) {
-	p := &ESPort{}
+	ch := make(chan []ESDoc)
+	p := &ESPort{docsC: ch, docC:make(chan ESDoc)}
 	c, err := elastic.NewClient(elastic.SetURL(addrs...))
 	if err != nil {
 		return nil, errors.Wrap(err, "new es client")
@@ -30,9 +45,66 @@ func NewESPort(addrs ...string) (*ESPort, error) {
 	return p, nil
 }
 
+func (p *ESPort) Start(ctx context.Context) {
+	p.logger = ctx.Value(constant.KEY_LOGGER).(*zap.Logger).
+		With(zap.String("mod", "esport"))
+	pWG := ctx.Value(constant.KEY_P_WG).(utils.IsGroup)
+	p.wg = utils.NewGroup(ctx)
+	pWG.Go(func() error {
+		return p.running()
+	})
+}
+
+func (p *ESPort) running()  error {
+	defer p.logger.Info("bye")
+	p.wg.Go(func() error {
+		return p.savingDocs()
+	})
+	err := p.wg.Wait()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *ESPort) savingDocs()  error {
+	maxBulkSize := 2000
+	// max delay seconds
+	maxDelay := 5
+	var bulker *ESBulker
+	var err error
+	for {
+		if bulker == nil {
+			bulker = NewEsBulker(p.Client)
+		}
+		select {
+		case p.wg.Context():
+			err = p.wg.Context().Err()
+			goto exit
+		case doc := <-p.docC:
+			bulker.Add(doc.Index, doc.Data)
+		case time.After(time.Duration(maxDelay) * time.Second):
+		}
+	}
+	
+	exit:
+	p.logger.Debug(fmt.Sprintf("savingDocs bye with err:%v", err))
+	return err
+}
+
 func (p *ESPort) ReadIndexInfo(index string) (IdxInfo, error) {
 	// todo: load balances
 	return readIdxInfo(index, p.Addrs[0])
+}
+
+func (p *ESPort) SaveDocs(ctx context.Context, docs []ESDoc) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case p.docsC <- docs:
+		return nil
+	}
+	return nil
 }
 
 func appendValue(buf []byte, value libs.Value) []byte {
@@ -90,18 +162,17 @@ func DumpEntry(entry *libs.Entry) []byte {
 }
 
 type ESBulker struct {
-	index 		string
 	docType 	string
 	routing 	string
 	bulks   	*elastic.BulkService
 }
 
-func NewEsBulker(es *elastic.Client, index string) *ESBulker {
-	return &ESBulker{index:index,docType:"log", bulks:es.Bulk()}
+func NewEsBulker(es *elastic.Client) *ESBulker {
+	return &ESBulker{docType:"log", bulks:es.Bulk()}
 }
 
-func (b *ESBulker) Add(doc []byte) {
-	req := elastic.NewBulkIndexRequest().Index(b.index).Type(b.docType).Doc(string(doc))
+func (b *ESBulker) Add(index string, doc string) {
+	req := elastic.NewBulkIndexRequest().Index(index).Type(b.docType).Doc(doc)
 	if b.routing != "" {
 		req = req.Routing(b.routing)
 	}
@@ -114,6 +185,10 @@ func (b *ESBulker) Do(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (b *ESBulker) GetSize() int64 {
+	return b.bulks.EstimatedSizeInBytes()
 }
 
 // EnsureIndex ensure index of `db` exist

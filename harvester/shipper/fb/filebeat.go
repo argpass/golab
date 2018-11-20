@@ -1,15 +1,15 @@
 package fb
 
 import (
-	"github.com/dbjtech/golab/harvester/shipper"
+	"github.com/argpass/golab/harvester/shipper"
 	"github.com/elastic/beats/libbeat/common"
 	"context"
-	"github.com/dbjtech/golab/harvester/libs/constant"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/libs"
 	"net"
 	"fmt"
 	"go.uber.org/zap"
-	"github.com/dbjtech/golab/pending/utils"
+	"github.com/argpass/golab/pending/utils"
 )
 
 func init()  {

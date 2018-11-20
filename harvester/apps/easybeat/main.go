@@ -5,7 +5,7 @@ import (
 
 	"github.com/elastic/beats/filebeat/beater"
 	"github.com/elastic/beats/libbeat/beat"
-	_ "github.com/dbjtech/golab/harvester/apps/easybeat/ari"
+	_ "github.com/argpass/golab/harvester/apps/easybeat/ari"
 )
 
 var Name = "filebeat"

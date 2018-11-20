@@ -1,0 +1,6 @@
+package: github.com/argpass/golab/offlinepoi
+import:
+- package: github.com/gansidui/geohash
+- package: github.com/syndtr/goleveldb
+  subpackages:
+  - leveldb

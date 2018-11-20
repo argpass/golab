@@ -18,7 +18,7 @@ import (
 
 var once = flag.Bool("once", false, "Run filebeat only once until all harvesters reach EOF")
 
-// Filebeat is a beater object. Contains all objects needed to run the beat
+// Filebeat is a realtime object. Contains all objects needed to run the beat
 type Filebeat struct {
 	config *cfg.Config
 	done   chan struct{}
@@ -41,7 +41,7 @@ func New(b *beat.Beat, rawConfig *common.Config) (beat.Beater, error) {
 	return fb, nil
 }
 
-// Run allows the beater to be run as a beat.
+// Run allows the realtime to be run as a beat.
 func (fb *Filebeat) Run(b *beat.Beat) error {
 	var err error
 	config := fb.config

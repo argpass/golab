@@ -2,15 +2,15 @@ package harvesterd
 
 import (
 	"context"
-	"github.com/dbjtech/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/libs/constant"
 	"github.com/elastic/beats/libbeat/common"
 	"go.uber.org/zap"
 	"sync"
-	"github.com/dbjtech/golab/harvester/db"
+	"github.com/argpass/golab/harvester/db"
 	"fmt"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"github.com/pkg/errors"
-	"github.com/dbjtech/golab/pending/utils"
+	"github.com/argpass/golab/pending/utils"
 )
 
 type Harvesterd struct {

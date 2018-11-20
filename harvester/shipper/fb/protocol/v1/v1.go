@@ -10,9 +10,9 @@ import (
 	"runtime"
 	"github.com/golang/protobuf/proto"
 	"errors"
-	"github.com/dbjtech/golab/harvester/libs/constant"
+	"github.com/argpass/golab/harvester/libs/constant"
 	"go.uber.org/zap"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"strings"
 )
 

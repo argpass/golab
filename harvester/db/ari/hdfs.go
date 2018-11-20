@@ -4,10 +4,10 @@ import (
 	"github.com/colinmarc/hdfs"
 	"fmt"
 	"sync"
-	"github.com/dbjtech/golab/harvester/harvesterd"
+	"github.com/argpass/golab/harvester/harvesterd"
 	"os"
 	"strings"
-	"github.com/dbjtech/golab/harvester/libs"
+	"github.com/argpass/golab/harvester/libs"
 	"github.com/pkg/errors"
 )
 
